@@ -51,6 +51,7 @@ actually carry out the wind-down you asked for.
 
 ```bash
 npm install -g spare10        # or, with no install at all: npx spare10 claude
+brew install alesdi/tap/spare10
 curl -fsSL https://raw.githubusercontent.com/alesdi/spare10/main/install.sh | sh
 ```
 
@@ -166,7 +167,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 122 tests: unit, plus the hooks as real subprocesses
+npm test          # 126 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```
