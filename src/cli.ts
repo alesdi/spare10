@@ -43,8 +43,13 @@ try {
   process.exit(main(process.argv.slice(2)));
 } catch (error) {
   if (error instanceof UsageError) {
-    process.stderr.write(error.message ? `spare10: ${error.message}\n\n${USAGE}\n` : `${USAGE}\n`);
-    process.exit(error.message ? 2 : 0);
+    // Help that was asked for is output; help shown because of a mistake is a diagnostic.
+    if (error.message) {
+      process.stderr.write(`spare10: ${error.message}\n\n${USAGE}\n`);
+      process.exit(2);
+    }
+    process.stdout.write(`${USAGE}\n`);
+    process.exit(0);
   }
   throw error;
 }
