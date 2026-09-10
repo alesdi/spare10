@@ -50,10 +50,13 @@ actually carry out the wind-down you asked for.
 > to avoid the runtime. Bundling one would cost 60–110 MB and make the hot path slower.
 
 ```bash
-npm install -g spare10        # or: npx spare10 claude
-brew install alesdi/tap/spare10
+npm install -g spare10        # or, with no install at all: npx spare10 claude
 curl -fsSL https://raw.githubusercontent.com/alesdi/spare10/main/install.sh | sh
 ```
+
+The install script fetches the same published bundle and puts `spare10` in
+`~/.local/bin`. It checks for Node 20+ first and tells you plainly if it is missing, rather
+than installing something that cannot run.
 
 ## Usage
 
