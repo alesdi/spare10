@@ -89,13 +89,20 @@ describe('renderBadge', () => {
     expect(renderBadge(state({ pct: 42 }), DEFAULT_CONFIG, 0)).toBe('');
   });
 
-  it('shows a paused marker at or above the threshold', () => {
-    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toBe('⏸ spare10 90%');
+  it('names what the percentage measures, and why it tripped', () => {
+    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toBe(
+      '⏸ spare10 quota 90% (limit 90%)',
+    );
   });
 
-  it('shows a resumed marker once disarmed', () => {
+  it('explains a trip that looks surprising against a low threshold', () => {
+    const badge = renderBadge(state({ pct: 15 }), { ...DEFAULT_CONFIG, threshold: 1 }, 0);
+    expect(badge).toBe('⏸ spare10 quota 15% (limit 1%)');
+  });
+
+  it('drops the limit once disarmed, since it is no longer the reason for anything', () => {
     expect(renderBadge(state({ pct: 95, disarmedUntil: 100 }), DEFAULT_CONFIG, 50)).toBe(
-      '▶ spare10 95%',
+      '▶ spare10 quota 95%',
     );
   });
 

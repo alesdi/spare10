@@ -40,10 +40,15 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
  */
 export function renderBadge(state: State, config: RunConfig, now: number): string {
   if (!config.badge) return '';
-  if (state.blind) return '⚠ spare10: quota data unavailable';
+  if (state.blind) return '⚠ spare10 quota unavailable';
   if (state.pct === null || state.pct < config.threshold) return '';
+
+  // Say what the number measures. A bare "spare10 15%" reads as though it could be headroom,
+  // and gives no hint why a low-looking figure has tripped the breaker.
   const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
-  return `${disarmed ? '▶' : '⏸'} spare10 ${state.pct}%`;
+  return disarmed
+    ? `▶ spare10 quota ${state.pct}%`
+    : `⏸ spare10 quota ${state.pct}% (limit ${config.threshold}%)`;
 }
 
 /** Run the user's original statusLine command with the untouched payload on its stdin. */
