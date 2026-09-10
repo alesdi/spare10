@@ -1,4 +1,6 @@
+import { parseArgs, UsageError, USAGE } from './args';
 import { runGate, runPost } from './gate';
+import { runLaunch } from './launch';
 import { runSensor } from './sensor';
 
 function flagValue(argv: string[], name: string): string | null {
@@ -29,9 +31,16 @@ function main(argv: string[]): number {
       return runPost(runDir);
     }
     default:
-      process.stderr.write(`spare10: unknown command ${command ?? '(none)'}\n`);
-      return 1;
+      return runLaunch(parseArgs(argv));
   }
 }
 
-process.exit(main(process.argv.slice(2)));
+try {
+  process.exit(main(process.argv.slice(2)));
+} catch (error) {
+  if (error instanceof UsageError) {
+    process.stderr.write(error.message ? `spare10: ${error.message}\n\n${USAGE}\n` : `${USAGE}\n`);
+    process.exit(error.message ? 2 : 0);
+  }
+  throw error;
+}
