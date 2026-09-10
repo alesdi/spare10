@@ -52,10 +52,29 @@ export function formatResetTime(resetsAt: number | null): string {
  * and anything longer turns the dialog into a wall. It deliberately does not ask a question,
  * because Claude Code asks one directly underneath.
  */
-export function quotaSummary(state: State, config: RunConfig): string {
+export function quotaFacts(state: State, config: RunConfig): string {
   return (
-    `spare10 — into your ${config.reserve}% reserve · ` +
+    `into your ${config.reserve}% reserve · ` +
     `${remaining(state.pct ?? 0)}% of quota left · resets ${formatResetTime(state.resetsAt)}`
+  );
+}
+
+export function quotaSummary(state: State, config: RunConfig): string {
+  return `spare10 — ${quotaFacts(state, config)}`;
+}
+
+/**
+ * What the agent receives when a pause prompt is configured.
+ *
+ * The user's instruction arrives with no context otherwise — mid-turn, an agent told to
+ * "commit and stop" has no idea who is asking or why, and may reasonably ignore it. The
+ * preamble names the source, states the situation, and only then hands over the instruction.
+ */
+export function pauseInstruction(state: State, config: RunConfig): string {
+  return (
+    `spare10 budget guard. You have reached the safe usage limit for this session ` +
+    `(${quotaFacts(state, config)}). Wrap up your work and stop.\n\n` +
+    `User instructions: ${config.pausePrompt ?? ''}`
   );
 }
 
@@ -101,7 +120,7 @@ export function decide({ state, config, now, permissionMode }: DecideInput): Dec
   if (state.pct < tripPoint(config)) return PASS;
 
   if (config.pausePrompt !== null && !state.pausePromptInjected) {
-    return { kind: 'inject', text: `${reasonText(state, config)}\n\n${config.pausePrompt}` };
+    return { kind: 'inject', text: pauseInstruction(state, config) };
   }
 
   if (permissionMode !== null && NON_INTERACTIVE_MODES.has(permissionMode)) {

@@ -41,7 +41,15 @@ spare10 --pause-prompt "Finish this block, commit, then stop." claude
 ```
 
 That text is injected into the running agent **without blocking it**, so the agent can
-actually carry out the wind-down you asked for.
+actually carry out the wind-down you asked for. It arrives with the situation attached, since
+an instruction turning up mid-turn otherwise has no context:
+
+```
+spare10 budget guard. You have reached the safe usage limit for this session
+(into your 10% reserve · 9% of quota left · resets 14:00). Wrap up your work and stop.
+
+User instructions: Finish this block, commit, then stop.
+```
 
 ## Install
 
@@ -167,7 +175,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 126 tests: unit, plus the hooks and CLI as real subprocesses
+npm test          # 128 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

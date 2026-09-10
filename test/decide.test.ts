@@ -84,6 +84,25 @@ describe('decide — tripped behaviour', () => {
     expect(decision.text).toContain('8% of quota left');
   });
 
+  it('frames the instruction so the agent knows who is asking and why', () => {
+    const decision = run(tripped(), config({ pausePrompt: 'Open a draft PR, then wait.' }));
+    if (decision.kind !== 'inject') throw new Error('expected an injection');
+
+    // Without a preamble the instruction arrives mid-turn with no context at all.
+    expect(decision.text).toMatch(/^spare10 budget guard\./);
+    expect(decision.text).toContain('safe usage limit for this session');
+    expect(decision.text).toContain('Wrap up your work and stop.');
+    // The user's own words come last, and verbatim.
+    expect(decision.text).toContain('User instructions: Open a draft PR, then wait.');
+    expect(decision.text.trimEnd().endsWith('Open a draft PR, then wait.')).toBe(true);
+  });
+
+  it('states the situation once, not twice', () => {
+    const decision = run(tripped(), config({ pausePrompt: 'Stop.' }));
+    if (decision.kind !== 'inject') throw new Error('expected an injection');
+    expect(decision.text.match(/spare10/g)?.length).toBe(1);
+  });
+
   it('does not re-inject a pause prompt that already fired', () => {
     const decision = run(tripped({ pausePromptInjected: true }), config({ pausePrompt: 'Stop.' }));
     expect(decision.kind).toBe('ask');
