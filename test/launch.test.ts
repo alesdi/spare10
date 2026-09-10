@@ -3,6 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs, UsageError } from '../src/args';
+import { preflightVerdict } from '../src/launch';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
@@ -138,5 +139,28 @@ describe('shellQuote', () => {
     ['with apostrophe', "o'brien", `'o'\\''brien'`],
   ])('quotes %s', (_label, input, expected) => {
     expect(shellQuote(input)).toBe(expected);
+  });
+});
+
+describe('preflightVerdict', () => {
+  it('says nothing when the reserve is untouched', () => {
+    expect(preflightVerdict(false, false, null)).toBe('clear');
+  });
+
+  it.each([['y'], ['Y'], ['yes'], ['  yes  ']])('treats %s as consent', (answer) => {
+    expect(preflightVerdict(true, false, answer)).toBe('consented');
+  });
+
+  it.each([[''], ['n'], ['no'], ['anything else']])('treats %s as a refusal', (answer) => {
+    // Empty means a bare Enter, which must not start a session that is already spent.
+    expect(preflightVerdict(true, false, answer)).toBe('declined');
+  });
+
+  it('never stalls an unattended run on a question', () => {
+    expect(preflightVerdict(true, true, null)).toBe('proceeding');
+  });
+
+  it('starts when there is no terminal to ask', () => {
+    expect(preflightVerdict(true, false, null)).toBe('proceeding');
   });
 });

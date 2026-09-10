@@ -11,6 +11,8 @@ const fixture = (name: string) =>
   readFileSync(join(__dirname, 'fixtures', `${name}.json`), 'utf8');
 
 const state = (overrides: Partial<State> = {}): State => ({ ...DEFAULT_STATE, ...overrides });
+// eslint-disable-next-line no-control-regex
+const stripAnsi = (text: string) => text.replace(/\u001b\[[0-9;]*m/g, '');
 
 describe('parseStatuslinePayload', () => {
   it('extracts the five-hour window from a real payload', () => {
@@ -89,19 +91,30 @@ describe('renderBadge', () => {
     expect(renderBadge(state({ pct: 42 }), DEFAULT_CONFIG, 0)).toBe('');
   });
 
-  it('says only its own name at the default reserve, which the name already states', () => {
-    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toBe('⏸ spare10');
+  it('says what is about to happen, not how much is left', () => {
+    const badge = renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0);
+    expect(stripAnsi(badge)).toBe('⚠ Pausing at next tool call');
   });
 
-  it('spells out a reserve that is not the default', () => {
-    const badge = renderBadge(state({ pct: 99 }), { ...DEFAULT_CONFIG, reserve: 99 }, 0);
-    expect(badge).toBe('⏸ spare10 (99%)');
+  it('blinks the icon, and only the icon', () => {
+    const badge = renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0);
+    expect(badge.startsWith('\u001b[5m⚠\u001b[25m')).toBe(true);
+    expect(badge).not.toContain('\u001b[5mPausing');
   });
 
-  it('switches the icon once disarmed', () => {
+  it('goes quiet-but-present once disarmed', () => {
     expect(renderBadge(state({ pct: 95, disarmedUntil: 100 }), DEFAULT_CONFIG, 50)).toBe(
       '▶ spare10',
     );
+  });
+
+  it('spells out a non-default reserve once disarmed', () => {
+    const badge = renderBadge(state({ pct: 99, disarmedUntil: 100 }), { ...DEFAULT_CONFIG, reserve: 99 }, 50);
+    expect(badge).toBe('▶ spare10 (99%)');
+  });
+
+  it('does not blink the blind warning, which is not urgent', () => {
+    expect(renderBadge(state({ blind: true }), DEFAULT_CONFIG, 0)).not.toContain('\u001b[5m');
   });
 
   it('warns when the sensor is blind', () => {

@@ -7,7 +7,7 @@ import { UsageError, type ParsedArgs } from './args';
 import { isTripped, noticeText } from './decide';
 import { buildSettings, readChainTarget } from './settings';
 import type { RunConfig } from './types';
-import { configPath, nowSeconds, pickSeed, readState, writeState } from './state';
+import { configPath, disarmUntil, nowSeconds, pickSeed, readState, writeState } from './state';
 
 const RUN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -81,24 +81,40 @@ function askTerminal(question: string): string | null {
   return answer.trim();
 }
 
+export type Preflight = 'clear' | 'consented' | 'declined' | 'proceeding';
+
+/**
+ * What to do once the quota is known, separated from the terminal so it can be tested.
+ *
+ * `answer` is null when there is no terminal to ask — an unattended launch proceeds rather
+ * than blocking on a question nobody will answer, as everywhere else here.
+ */
+export function preflightVerdict(
+  tripped: boolean,
+  hasPausePrompt: boolean,
+  answer: string | null,
+): Preflight {
+  if (!tripped) return 'clear';
+  if (hasPausePrompt) return 'proceeding';
+  if (answer === null) return 'proceeding';
+  return /^y(es)?$/i.test(answer.trim()) ? 'consented' : 'declined';
+}
+
 /**
  * Warn before starting a session that is already into the reserve.
  *
  * Seeding means spare10 usually knows the quota before Claude Code is even launched, so the
- * cheapest stop is the one that happens before anything starts. Returns false to abort.
+ * cheapest stop is the one that happens before anything starts.
  */
-function preflight(runDir: string, config: RunConfig): boolean {
+function preflight(runDir: string, config: RunConfig): Preflight {
   const state = readState(runDir);
-  if (!isTripped(state, { ...config, chain: null }, nowSeconds())) return true;
+  if (!isTripped(state, config, nowSeconds())) return 'clear';
 
-  process.stderr.write(`\n${noticeText(state, { ...config, chain: null })}\n`);
+  process.stderr.write(`\n${noticeText(state, config)}\n`);
 
   // An unattended run has already been told what to do on trip; do not stall it on a prompt.
-  if (config.pausePrompt !== null) return true;
-
-  const answer = askTerminal('Start anyway? [y/N] ');
-  if (answer === null) return true; // no terminal to ask: fail open, as everywhere else
-  return /^y(es)?$/i.test(answer);
+  const answer = config.pausePrompt !== null ? null : askTerminal('Start anyway? [y/N] ');
+  return preflightVerdict(true, config.pausePrompt !== null, answer);
 }
 
 export function selfPath(): string {
@@ -122,9 +138,17 @@ export function runLaunch({ config, command }: ParsedArgs): number {
   const runDir = createRunDir(root);
 
   seedFromPreviousRuns(root, runDir);
-  if (!preflight(runDir, { ...config, chain: null })) {
+  const verdict = preflight(runDir, { ...config, chain: null });
+  if (verdict === 'declined') {
     process.stderr.write('Not started.\n');
     return 0;
+  }
+  if (verdict === 'consented') {
+    // Consent given at the door counts for the window. Asking again on the first tool call
+    // would be the same question, thirty seconds later.
+    const state = readState(runDir);
+    writeState(runDir, { ...state, disarmedUntil: disarmUntil(state, nowSeconds()) });
+    process.stderr.write('Continuing into the reserve for this window.\n\n');
   }
 
   const chain = readChainTarget(claudeSettingsPath());

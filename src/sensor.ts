@@ -34,19 +34,29 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
   };
 }
 
+/** SGR 5. Terminals that do not implement blink typically render it as bold or ignore it. */
+const blink = (text: string) => `\u001b[5m${text}\u001b[25m`;
+
 /**
  * The status line stays empty until the reserve is reached — spare10 is invisible until
  * it has something to say. `spare10 doctor` is the "is it running?" affordance.
+ *
+ * This is the only channel that reliably reaches the user mid-session: a hook's plain output
+ * becomes context for the model, which paraphrases it, and its one user-visible path is exit
+ * code 2, which erases whatever the user had typed.
  */
 export function renderBadge(state: State, config: RunConfig, now: number): string {
   if (!config.badge) return '';
   if (state.blind) return '⚠ spare10 quota unavailable';
   if (state.pct === null || state.pct < tripPoint(config)) return '';
 
-  // The name already says 10, so the reserve is only worth spelling out when it is not 10.
-  const reserve = config.reserve === DEFAULT_RESERVE ? '' : ` (${config.reserve}%)`;
   const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
-  return `${disarmed ? '▶' : '⏸'} spare10${reserve}`;
+  if (disarmed) {
+    // The name already says 10, so the reserve is only spelled out when it is not 10.
+    const reserve = config.reserve === DEFAULT_RESERVE ? '' : ` (${config.reserve}%)`;
+    return `▶ spare10${reserve}`;
+  }
+  return `${blink('⚠')} Pausing at next tool call`;
 }
 
 /** Run the user's original statusLine command with the untouched payload on its stdin. */
