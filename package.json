@@ -1,0 +1,24 @@
+{
+  "name": "spare10",
+  "version": "0.1.0",
+  "description": "Circuit breaker for Claude Code: pause autonomous sessions before the 5-hour quota runs out",
+  "keywords": ["claude-code", "claude", "rate-limit", "quota", "circuit-breaker", "cli"],
+  "license": "MIT",
+  "type": "module",
+  "engines": { "node": ">=20" },
+  "bin": { "spare10": "dist/spare10.js" },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm run test && npm run build"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
