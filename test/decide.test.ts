@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decide, formatResetTime, type Decision } from '../src/decide';
+import { decide, formatResetTime, isTripped, noticeText, type Decision } from '../src/decide';
 import { DEFAULT_CONFIG, DEFAULT_STATE, type RunConfig, type State } from '../src/types';
 
 const NOW = 1_000_000;
@@ -107,6 +107,27 @@ describe('decide — tripped behaviour', () => {
   it('prefers the pause prompt over the deny fallback in non-interactive modes', () => {
     const decision = run(tripped(), config({ pausePrompt: 'Wind down.' }), 'bypassPermissions');
     expect(decision.kind).toBe('inject');
+  });
+});
+
+describe('isTripped and noticeText', () => {
+  it('is quiet whenever the gate would pass', () => {
+    expect(isTripped(tripped({ pct: 40 }), config(), NOW)).toBe(false);
+    expect(isTripped(tripped({ disarmedUntil: NOW + 1 }), config(), NOW)).toBe(false);
+  });
+
+  it('holds while the reserve is in use', () => {
+    expect(isTripped(tripped(), config(), NOW)).toBe(true);
+  });
+
+  it('explains that the pause happens between operations, not mid-write', () => {
+    const notice = noticeText(tripped(), config());
+    expect(notice).toContain('pause safely at the next tool call');
+    expect(notice).toContain('nothing will be left half-written');
+  });
+
+  it('says "first" rather than "next" before a session has started', () => {
+    expect(noticeText(tripped(), config(), true)).toContain('at its first tool call');
   });
 });
 

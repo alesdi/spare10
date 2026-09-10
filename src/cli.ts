@@ -1,5 +1,5 @@
 import { parseArgs, UsageError, USAGE } from './args';
-import { runGate, runPost } from './gate';
+import { runGate, runNotice, runPost } from './gate';
 import { runDoctor } from './doctor-report';
 import { runLaunch } from './launch';
 import { runSensor } from './sensor';
@@ -30,6 +30,12 @@ function main(argv: string[]): number {
       const runDir = flagValue(rest, '--run');
       if (!runDir) return 0;
       return runPost(runDir);
+    }
+
+    case 'notice': {
+      const runDir = flagValue(rest, '--run');
+      if (!runDir) return 0;
+      return runNotice(runDir);
     }
     case 'doctor':
       return runDoctor();

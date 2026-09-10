@@ -44,10 +44,35 @@ export function formatResetTime(resetsAt: number | null): string {
   return new Date(resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-function reasonText(state: State, config: RunConfig): string {
+/** The one sentence every spare10 message opens with, so the wording never drifts. */
+export function quotaSummary(state: State, config: RunConfig): string {
   return (
     `spare10 — ${remaining(state.pct ?? 0)}% of the 5-hour window left, ` +
     `which is your ${config.reserve}% reserve. Resets at ${formatResetTime(state.resetsAt)}.`
+  );
+}
+
+const reasonText = quotaSummary;
+
+/**
+ * Whether the breaker is currently holding. Used by the places that only warn — the launcher
+ * before it starts a session, and the prompt-submit notice — neither of which decides anything.
+ */
+export function isTripped(state: State, config: RunConfig, now: number): boolean {
+  return decide({ state, config, now, permissionMode: null }).kind !== 'pass';
+}
+
+/**
+ * Shown when the user is about to spend a turn while the reserve is already in use.
+ *
+ * The gate fires on tool calls, which is what makes its stops safe: it interrupts between
+ * calls rather than mid-write. Saying so here stops the pause reading like a hang.
+ */
+export function noticeText(state: State, config: RunConfig, atStartup = false): string {
+  return (
+    `${quotaSummary(state, config)} The agent will pause safely at ` +
+    `${atStartup ? 'its first' : 'the next'} tool call, between operations — nothing will be ` +
+    `left half-written.`
   );
 }
 

@@ -99,8 +99,12 @@ describe('buildSettings', () => {
     padding: 0,
   });
 
-  it('registers both hooks so the approval signal can be observed', () => {
-    expect(Object.keys(settings['hooks'] as object)).toEqual(['PreToolUse', 'PostToolUse']);
+  it('registers the gate, the approval signal, and the prompt-submit notice', () => {
+    expect(Object.keys(settings['hooks'] as object)).toEqual([
+      'PreToolUse',
+      'PostToolUse',
+      'UserPromptSubmit',
+    ]);
   });
 
   it('invokes spare10 by absolute path, never through a package runner', () => {

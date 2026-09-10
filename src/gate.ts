@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { decide } from './decide';
+import { decide, isTripped, noticeText } from './decide';
 import { parseHookPayload } from './hook-payload';
 import { disarmUntil, nowSeconds, readRunConfig, readState, writeState } from './state';
 
@@ -69,6 +69,20 @@ export function runGate(runDir: string): number {
       });
       return 0;
   }
+}
+
+/**
+ * UserPromptSubmit. It cannot block — exit code 2 would erase what the user typed — so it only
+ * speaks. Plain stdout on this event is added as context both the user and Claude can see.
+ */
+export function runNotice(runDir: string): number {
+  drainStdin();
+  const config = readRunConfig(runDir);
+  const state = readState(runDir);
+  if (!isTripped(state, config, nowSeconds())) return 0;
+
+  process.stdout.write(noticeText(state, config));
+  return 0;
 }
 
 export function runPost(runDir: string): number {

@@ -87,10 +87,22 @@ that can *stop* anything. So spare10 splits in two and joins them through a stat
 spare10 claude
   └─ exec claude --settings '{ statusLine: …, hooks: { PreToolUse: …, PostToolUse: … } }'
 
-  sensor   (status line, every 5s)   reads rate_limits → writes state
+  sensor   (status line, every 2s)   reads rate_limits → writes state
   gate     (PreToolUse, every call)  reads state → passes, asks, injects, or denies
   post     (PostToolUse)             the tool ran, so the user approved → disarm
+  notice   (UserPromptSubmit)        warns, without blocking, before you spend a turn
 ```
+
+**It stops between operations, not mid-write.** The gate fires on tool calls, and that is the
+point rather than a limitation: it interrupts in the gap between one call and the next, where
+nothing is half-written and no command is in flight. A keystroke-level interrupt would land
+wherever the agent happened to be — which is the mess spare10 exists to avoid.
+
+The cost is that a turn producing only text is not gated. Two things narrow that. Before
+launching, spare10 already knows your quota from the previous run, so `spare10 claude` asks for
+confirmation rather than starting a session that would stop on its first move. And during a
+session, submitting a prompt while the reserve is in use prints a notice — it cannot block,
+since blocking there would erase what you typed, but you never spend a turn unaware.
 
 Three consequences worth knowing:
 
@@ -143,7 +155,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 103 tests: unit, plus gate/post as real subprocesses
+npm test          # 111 tests: unit, plus the hooks as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```
