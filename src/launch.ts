@@ -5,7 +5,7 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UsageError, type ParsedArgs } from './args';
 import { buildSettings, readChainTarget } from './settings';
-import { configPath } from './state';
+import { configPath, nowSeconds, pickSeed, readState, writeState } from './state';
 
 const RUN_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -28,6 +28,23 @@ function pruneOldRuns(root: string, now: number): void {
       /* a run we cannot stat or remove is not worth failing a launch over */
     }
   }
+}
+
+/** Open the run with the newest still-valid reading from any earlier run, if there is one. */
+function seedFromPreviousRuns(root: string, runDir: string): void {
+  let entries: string[];
+  try {
+    entries = readdirSync(root);
+  } catch {
+    return;
+  }
+  const previous = entries
+    .map((entry) => join(root, entry))
+    .filter((path) => path !== runDir)
+    .map(readState);
+
+  const seed = pickSeed(previous, nowSeconds());
+  if (seed !== null) writeState(runDir, seed);
 }
 
 function createRunDir(root: string): string {
@@ -56,6 +73,8 @@ export function runLaunch({ config, command }: ParsedArgs): number {
   const root = runsRoot();
   pruneOldRuns(root, Date.now());
   const runDir = createRunDir(root);
+
+  seedFromPreviousRuns(root, runDir);
 
   const chain = readChainTarget(claudeSettingsPath());
   writeFileSync(configPath(runDir), JSON.stringify({ ...config, chain: chain.command }, null, 2));

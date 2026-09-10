@@ -111,7 +111,11 @@ export function runDoctor(): number {
 
   if (state.pct !== null && state.updatedAt !== null) {
     out(`  ${MARK.ok} quota         ${state.pct}% used, ${100 - state.pct}% left`);
-    out(`  ${MARK.info} last reading  ${formatDuration(now - state.updatedAt)} ago`);
+    const age = now - state.updatedAt;
+    out(
+      `  ${MARK.info} last reading  ${formatDuration(age)} ago` +
+        (age > config.refresh * 3 ? ' (no session running; still valid for this window)' : ''),
+    );
   }
   if (state.resetsAt !== null) {
     out(`  ${MARK.info} resets        ${formatClock(state.resetsAt)} (in ${formatDuration(state.resetsAt - now)})`);

@@ -26,7 +26,8 @@ describe('decide — fail-open branches', () => {
     ['no reading has ever landed', tripped({ pct: null })],
     ['no timestamp on the reading', tripped({ updatedAt: null })],
     ['the sensor has gone blind', tripped({ blind: true })],
-    ['the reading is stale', tripped({ updatedAt: NOW - DEFAULT_CONFIG.refresh * 3 - 1 })],
+    ['the window it described has reset', tripped({ resetsAt: NOW - 1 })],
+    ['there is no window and the reading is old', tripped({ resetsAt: null, updatedAt: NOW - 999 })],
     ['the user already consented', tripped({ disarmedUntil: NOW + 1 })],
   ])('passes when %s', (_label, state) => {
     expect(run(state).kind).toBe('pass');
@@ -50,8 +51,16 @@ describe('decide — fail-open branches', () => {
     expect(run(tripped({ disarmedUntil: NOW })).kind).toBe('ask');
   });
 
-  it('treats a reading at exactly the staleness limit as fresh', () => {
-    expect(run(tripped({ updatedAt: NOW - DEFAULT_CONFIG.refresh * 3 })).kind).toBe('ask');
+  it('still gates on an old reading while its window is open', () => {
+    // Usage only rises within a window, so an old figure understates it — never the reverse.
+    // Expiring it on a timer used to open the gate during any gap in status line rendering.
+    expect(run(tripped({ updatedAt: NOW - 7200 })).kind).toBe('ask');
+  });
+
+  it('falls back to the poll interval when there is no window to anchor to', () => {
+    const cfg = config();
+    const edge = tripped({ resetsAt: null, updatedAt: NOW - cfg.refresh * 3 });
+    expect(decide({ state: edge, config: cfg, now: NOW, permissionMode: 'default' }).kind).toBe('ask');
   });
 });
 

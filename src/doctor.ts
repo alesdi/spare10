@@ -1,4 +1,5 @@
-import { remaining, STALE_REFRESH_MULTIPLE, tripPoint, type RunConfig, type State } from './types';
+import { isReadingApplicable } from './decide';
+import { remaining, tripPoint, type RunConfig, type State } from './types';
 
 export type Diagnosis =
   | { status: 'no-data'; detail: string }
@@ -16,9 +17,8 @@ export function diagnose(state: State, config: RunConfig, now: number): Diagnosi
   if (state.blind) {
     return { status: 'blind', detail: 'Claude Code is not reporting rate_limits on this plan' };
   }
-  const age = now - state.updatedAt;
-  if (age > config.refresh * STALE_REFRESH_MULTIPLE) {
-    return { status: 'stale', detail: `no active session; last reading ${formatDuration(age)} ago` };
+  if (!isReadingApplicable(state, config, now)) {
+    return { status: 'stale', detail: 'the window this reading described has already reset' };
   }
   if (state.disarmedUntil !== null && now < state.disarmedUntil) {
     return { status: 'disarmed', detail: `consent given; quiet until ${formatClock(state.disarmedUntil)}` };

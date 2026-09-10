@@ -8,7 +8,7 @@ import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 describe('parseArgs', () => {
   it('defaults to a 10% reserve and no pause prompt', () => {
     const { config, command } = parseArgs(['claude']);
-    expect(config).toMatchObject({ reserve: 10, pausePrompt: null, refresh: 5, badge: true });
+    expect(config).toMatchObject({ reserve: 10, pausePrompt: null, refresh: 2, badge: true });
     expect(command).toEqual(['claude']);
   });
 

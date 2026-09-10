@@ -62,7 +62,7 @@ spare10 [options] <command> [args...]
 
   --reserve <1-99>       Keep this much of the 5-hour window back for yourself (default: 10)
   --pause-prompt <text>  Inject this instruction instead of asking
-  --refresh <seconds>    Quota poll interval, also the staleness unit (default: 5)
+  --refresh <seconds>    Quota poll interval (default: 2)
   --no-badge             Never draw the spare10 marker in the status line
   doctor                 Report what spare10 detected and what it would do
 ```
@@ -103,6 +103,13 @@ still fire. The status line does *not* merge — ours replaces it — so spare10
 original status line command with the untouched payload and prints its output. If you have
 none, spare10 draws nothing at all until the reserve is reached.
 
+**It knows the quota from the first tool call.** Claude Code omits `rate_limits` from the
+first status line payload of every session, so a fresh run is briefly blind — long enough for
+the opening turn to slip past. spare10 opens each run with the most recent reading from the
+previous run in the same window. Quota is account-wide and only rises within a window, so that
+figure is a lower bound: it can bring a stop forward, never invent one. Only the very first run
+of a window starts with nothing.
+
 **It fails open, always.** No reading, a stale reading, a plan that doesn't report
 `rate_limits`, a corrupt state file, a missing run directory — every one of those lets the
 tool call through. A quota guard that blocks your session because it went blind is worse than
@@ -136,7 +143,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 96 tests: unit, plus gate/post as real subprocesses
+npm test          # 103 tests: unit, plus gate/post as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

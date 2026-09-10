@@ -15,7 +15,7 @@ describe('diagnose', () => {
   it.each([
     ['no-data', state({ pct: null })],
     ['blind', state({ blind: true })],
-    ['stale', state({ updatedAt: NOW - 100 })],
+    ['stale', state({ resetsAt: NOW - 1 })],
     ['disarmed', state({ pct: 95, disarmedUntil: NOW + 10 })],
     ['tripped', state({ pct: 95 })],
     ['armed', state({ pct: 40 })],
@@ -29,9 +29,10 @@ describe('diagnose', () => {
     expect(detail).toContain('10% is reserved');
   });
 
-  it('describes staleness as an ended session rather than a fault', () => {
-    const verdict = diagnose(state({ updatedAt: NOW - 600 }), DEFAULT_CONFIG, NOW);
-    expect(verdict.detail).toContain('no active session');
+  it('reports a reading whose window has reset, not merely an old one', () => {
+    expect(diagnose(state({ resetsAt: NOW - 1 }), DEFAULT_CONFIG, NOW).detail).toContain('already reset');
+    // An old reading inside a live window is still the truth.
+    expect(diagnose(state({ updatedAt: NOW - 7200 }), DEFAULT_CONFIG, NOW).status).toBe('armed');
   });
 
   it('agrees with the boundary used by the gate', () => {

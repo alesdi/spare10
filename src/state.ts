@@ -83,3 +83,28 @@ export function readRunConfig(runDir: string): RunConfig {
 export function disarmUntil(state: State, now: number): number {
   return state.resetsAt ?? now + FALLBACK_DISARM_SECONDS;
 }
+
+/**
+ * Choose a reading from an earlier run to start a new session with.
+ *
+ * Claude Code omits rate_limits from the first status line payload of every session, so a
+ * fresh run is blind for one poll interval — long enough for the opening turn to slip past
+ * the gate entirely. Quota is account-wide and only rises within a window, so the most recent
+ * reading from the *same* window is a safe lower bound to open with: it can bring a trip
+ * forward, never invent one.
+ *
+ * Only the quota figures carry over. A new session always starts armed, whatever consent the
+ * previous one was given.
+ */
+export function pickSeed(candidates: State[], now: number): State | null {
+  const usable = candidates.filter(
+    (s): s is State & { pct: number; resetsAt: number; updatedAt: number } =>
+      s.pct !== null && s.updatedAt !== null && s.resetsAt !== null && s.resetsAt > now,
+  );
+  const best = usable.reduce<(State & { updatedAt: number }) | null>(
+    (winner, s) => (winner === null || s.updatedAt > winner.updatedAt ? s : winner),
+    null,
+  );
+  if (best === null) return null;
+  return { ...DEFAULT_STATE, pct: best.pct, resetsAt: best.resetsAt, updatedAt: best.updatedAt };
+}

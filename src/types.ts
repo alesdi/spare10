@@ -46,10 +46,14 @@ export const DEFAULT_STATE: State = {
 /** The reserve the tool is named after. Shown in the status line only when overridden. */
 export const DEFAULT_RESERVE = 10;
 
+/** Status line poll interval. The first payload of a session carries no rate_limits, so this
+ *  is also how long spare10 is blind at startup — keep it short. */
+export const DEFAULT_REFRESH = 2;
+
 export const DEFAULT_CONFIG: RunConfig = {
   reserve: DEFAULT_RESERVE,
   pausePrompt: null,
-  refresh: 5,
+  refresh: DEFAULT_REFRESH,
   badge: true,
   chain: null,
 };
