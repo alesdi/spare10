@@ -30,6 +30,7 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
     blind: false,
     disarmedUntil: rolledOver ? null : prev.disarmedUntil,
     pausePromptInjected: rolledOver ? false : prev.pausePromptInjected,
+    awaitingApproval: rolledOver ? false : prev.awaitingApproval,
   };
 }
 

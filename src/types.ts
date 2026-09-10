@@ -14,6 +14,8 @@ export interface State {
   disarmedUntil: number | null;
   /** Whether --pause-prompt has already been injected this window. */
   pausePromptInjected: boolean;
+  /** Set when the gate emitted an `ask`; PostToolUse reads it as the approval signal. */
+  awaitingApproval: boolean;
 }
 
 /** Per-run configuration, written by the launcher and read by sensor/gate/post. */
@@ -38,6 +40,7 @@ export const DEFAULT_STATE: State = {
   blind: false,
   disarmedUntil: null,
   pausePromptInjected: false,
+  awaitingApproval: false,
 };
 
 export const DEFAULT_CONFIG: RunConfig = {
@@ -50,3 +53,9 @@ export const DEFAULT_CONFIG: RunConfig = {
 
 /** rate_limits payloads go missing on the first invocation of every session. */
 export const BLIND_DEBOUNCE = 3;
+
+/** State older than this many refresh intervals is treated as unknown, and the gate opens. */
+export const STALE_REFRESH_MULTIPLE = 3;
+
+/** Fallback disarm span when resets_at is unknown, in seconds. */
+export const FALLBACK_DISARM_SECONDS = 3600;

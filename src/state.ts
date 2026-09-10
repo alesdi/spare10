@@ -1,6 +1,12 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULT_STATE, DEFAULT_CONFIG, type State, type RunConfig } from './types';
+import {
+  DEFAULT_STATE,
+  DEFAULT_CONFIG,
+  FALLBACK_DISARM_SECONDS,
+  type State,
+  type RunConfig,
+} from './types';
 
 export const statePath = (runDir: string) => join(runDir, 'state.json');
 export const configPath = (runDir: string) => join(runDir, 'config.json');
@@ -34,6 +40,7 @@ export function readState(runDir: string): State {
     blind: bool(raw['blind'], false),
     disarmedUntil: num(raw['disarmedUntil'], null),
     pausePromptInjected: bool(raw['pausePromptInjected'], false),
+    awaitingApproval: bool(raw['awaitingApproval'], false),
   };
 }
 
@@ -67,4 +74,12 @@ export function readRunConfig(runDir: string): RunConfig {
     badge: bool(raw['badge'], DEFAULT_CONFIG.badge),
     chain: typeof raw['chain'] === 'string' && raw['chain'] ? raw['chain'] : null,
   };
+}
+
+/**
+ * How long to stay quiet once the user has consented (or the pause prompt has fired).
+ * Anchored to the window reset so the breaker re-arms exactly when the quota does.
+ */
+export function disarmUntil(state: State, now: number): number {
+  return state.resetsAt ?? now + FALLBACK_DISARM_SECONDS;
 }

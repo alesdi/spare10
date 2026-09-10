@@ -1,3 +1,4 @@
+import { runGate, runPost } from './gate';
 import { runSensor } from './sensor';
 
 function flagValue(argv: string[], name: string): string | null {
@@ -14,6 +15,18 @@ function main(argv: string[]): number {
       const runDir = flagValue(rest, '--run');
       if (!runDir) return 0; // fail open: a misconfigured sensor must not break the status line
       return runSensor(runDir);
+    }
+
+    case 'gate': {
+      const runDir = flagValue(rest, '--run');
+      if (!runDir) return 0; // fail open: a misconfigured gate must never block a tool call
+      return runGate(runDir);
+    }
+
+    case 'post': {
+      const runDir = flagValue(rest, '--run');
+      if (!runDir) return 0;
+      return runPost(runDir);
     }
     default:
       process.stderr.write(`spare10: unknown command ${command ?? '(none)'}\n`);
