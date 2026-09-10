@@ -1,5 +1,6 @@
 import { parseArgs, UsageError, USAGE } from './args';
 import { runGate, runPost } from './gate';
+import { runDoctor } from './doctor-report';
 import { runLaunch } from './launch';
 import { runSensor } from './sensor';
 
@@ -30,6 +31,9 @@ function main(argv: string[]): number {
       if (!runDir) return 0;
       return runPost(runDir);
     }
+    case 'doctor':
+      return runDoctor();
+
     default:
       return runLaunch(parseArgs(argv));
   }

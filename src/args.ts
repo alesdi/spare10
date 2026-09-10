@@ -19,6 +19,9 @@ Options:
   --no-badge            Never draw the spare10 marker in the status line
   -h, --help            Show this message
 
+Commands:
+  doctor                Report what spare10 detected and what it would do
+
 Examples:
   spare10 claude
   spare10 --threshold 85 claude

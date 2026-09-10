@@ -1,5 +1,7 @@
 import { build } from 'esbuild';
-import { chmod } from 'node:fs/promises';
+import { chmod, readFile } from 'node:fs/promises';
+
+const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
 
 const outfile = 'dist/spare10.js';
 
@@ -12,6 +14,7 @@ await build({
   format: 'esm',
   minify: true,
   banner: { js: '#!/usr/bin/env node' },
+  define: { __SPARE10_VERSION__: JSON.stringify(version) },
   legalComments: 'none',
 });
 
