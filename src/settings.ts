@@ -75,10 +75,6 @@ export function buildSettings(input: SettingsInput): Record<string, unknown> {
 
   return {
     statusLine,
-    hooks: {
-      PreToolUse: hook('gate'),
-      PostToolUse: hook('post'),
-      UserPromptSubmit: hook('notice'),
-    },
+    hooks: { PreToolUse: hook('gate'), PostToolUse: hook('post') },
   };
 }

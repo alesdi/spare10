@@ -122,12 +122,8 @@ describe('isTripped and noticeText', () => {
 
   it('explains that the pause happens between operations, not mid-write', () => {
     const notice = noticeText(tripped(), config());
-    expect(notice).toContain('pause safely at the next tool call');
+    expect(notice).toContain('pause safely at its first tool call');
     expect(notice).toContain('nothing will be left half-written');
-  });
-
-  it('says "first" rather than "next" before a session has started', () => {
-    expect(noticeText(tripped(), config(), true)).toContain('at its first tool call');
   });
 });
 

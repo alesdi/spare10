@@ -26,7 +26,7 @@ function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string
   return dir;
 }
 
-function invoke(command: 'gate' | 'post' | 'notice', dir: string, payload: unknown) {
+function invoke(command: 'gate' | 'post', dir: string, payload: unknown) {
   const result = spawnSync('node', [BUNDLE, command, '--run', dir], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
@@ -144,31 +144,3 @@ describe('the ask → approve → disarm cycle', () => {
   });
 });
 
-describe('the prompt-submit notice', () => {
-  const submit = { hook_event_name: 'UserPromptSubmit', prompt: 'carry on' };
-
-  it('warns as plain text, which this event feeds back as context', () => {
-    const dir = makeRun({ pct: 93 });
-    const result = invoke('notice', dir, submit);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toContain('pause safely at the next tool call');
-    // It only speaks: blocking here would erase what the user typed.
-    expect(result.stdout).not.toContain('permissionDecision');
-  });
-
-  it('says nothing while the reserve is untouched', () => {
-    expect(invoke('notice', makeRun({ pct: 40 }), submit).stdout).toBe('');
-  });
-
-  it('says nothing once the user has already consented', () => {
-    const dir = makeRun({ pct: 93, disarmedUntil: nowSeconds() + 600 });
-    expect(invoke('notice', dir, submit).stdout).toBe('');
-  });
-
-  it('never changes state — it is an observer', () => {
-    const dir = makeRun({ pct: 93 });
-    const before = JSON.stringify(readState(dir));
-    invoke('notice', dir, submit);
-    expect(JSON.stringify(readState(dir))).toBe(before);
-  });
-});

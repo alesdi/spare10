@@ -90,7 +90,6 @@ spare10 claude
   sensor   (status line, every 2s)   reads rate_limits → writes state
   gate     (PreToolUse, every call)  reads state → passes, asks, injects, or denies
   post     (PostToolUse)             the tool ran, so the user approved → disarm
-  notice   (UserPromptSubmit)        warns, without blocking, before you spend a turn
 ```
 
 **It stops between operations, not mid-write.** The gate fires on tool calls, and that is the
@@ -98,11 +97,12 @@ point rather than a limitation: it interrupts in the gap between one call and th
 nothing is half-written and no command is in flight. A keystroke-level interrupt would land
 wherever the agent happened to be — which is the mess spare10 exists to avoid.
 
-The cost is that a turn producing only text is not gated. Two things narrow that. Before
-launching, spare10 already knows your quota from the previous run, so `spare10 claude` asks for
-confirmation rather than starting a session that would stop on its first move. And during a
-session, submitting a prompt while the reserve is in use prints a notice — it cannot block,
-since blocking there would erase what you typed, but you never spend a turn unaware.
+The cost is that a turn producing only text is not gated. Before launching, spare10 already
+knows your quota from the previous run, so `spare10 claude` asks for confirmation rather than
+starting a session that would stop on its first move. Once a session is running, the status
+line badge is the signal — a hook's only user-visible channel is exit code 2, which on
+`UserPromptSubmit` erases what you typed, and plain output there becomes model context that
+Claude paraphrases rather than a message you can rely on.
 
 Three consequences worth knowing:
 
@@ -155,7 +155,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 111 tests: unit, plus the hooks as real subprocesses
+npm test          # 106 tests: unit, plus the hooks as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

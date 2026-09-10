@@ -91,7 +91,7 @@ function preflight(runDir: string, config: RunConfig): boolean {
   const state = readState(runDir);
   if (!isTripped(state, { ...config, chain: null }, nowSeconds())) return true;
 
-  process.stderr.write(`\n${noticeText(state, { ...config, chain: null }, true)}\n`);
+  process.stderr.write(`\n${noticeText(state, { ...config, chain: null })}\n`);
 
   // An unattended run has already been told what to do on trip; do not stall it on a prompt.
   if (config.pausePrompt !== null) return true;

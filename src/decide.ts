@@ -63,16 +63,19 @@ export function isTripped(state: State, config: RunConfig, now: number): boolean
 }
 
 /**
- * Shown when the user is about to spend a turn while the reserve is already in use.
+ * Shown by the launcher before a session starts.
  *
- * The gate fires on tool calls, which is what makes its stops safe: it interrupts between
- * calls rather than mid-write. Saying so here stops the pause reading like a hang.
+ * There is no equivalent once the session is running: a hook's only user-visible channel is
+ * exit code 2, which on UserPromptSubmit erases what the user typed. The status line badge
+ * carries the signal from then on.
+ *
+ * The gate fires on tool calls, and that is what makes its stops safe — it interrupts between
+ * calls rather than mid-write. Saying so stops the pause reading like a hang.
  */
-export function noticeText(state: State, config: RunConfig, atStartup = false): string {
+export function noticeText(state: State, config: RunConfig): string {
   return (
-    `${quotaSummary(state, config)} The agent will pause safely at ` +
-    `${atStartup ? 'its first' : 'the next'} tool call, between operations — nothing will be ` +
-    `left half-written.`
+    `${quotaSummary(state, config)} The agent will pause safely at its first tool call, ` +
+    `between operations — nothing will be left half-written.`
   );
 }
 

@@ -99,12 +99,10 @@ describe('buildSettings', () => {
     padding: 0,
   });
 
-  it('registers the gate, the approval signal, and the prompt-submit notice', () => {
-    expect(Object.keys(settings['hooks'] as object)).toEqual([
-      'PreToolUse',
-      'PostToolUse',
-      'UserPromptSubmit',
-    ]);
+  it('registers the gate and the approval signal, and nothing on prompt submit', () => {
+    // UserPromptSubmit has no user-visible non-blocking channel: stdout there is model
+    // context, which the model paraphrases, and exit 2 erases what the user typed.
+    expect(Object.keys(settings['hooks'] as object)).toEqual(['PreToolUse', 'PostToolUse']);
   });
 
   it('invokes spare10 by absolute path, never through a package runner', () => {
