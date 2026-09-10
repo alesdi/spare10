@@ -44,11 +44,18 @@ export function formatResetTime(resetsAt: number | null): string {
   return new Date(resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/** The one sentence every spare10 message opens with, so the wording never drifts. */
+/**
+ * The one line every spare10 message opens with, so the wording never drifts.
+ *
+ * Kept terse on purpose: in the permission dialog this sits inside Claude Code's own chrome —
+ * "Hook PreToolUse:Bash requires confirmation", a settings footer, and its own yes/no prompt —
+ * and anything longer turns the dialog into a wall. It deliberately does not ask a question,
+ * because Claude Code asks one directly underneath.
+ */
 export function quotaSummary(state: State, config: RunConfig): string {
   return (
-    `spare10 — ${remaining(state.pct ?? 0)}% of the 5-hour window left, ` +
-    `which is your ${config.reserve}% reserve. Resets at ${formatResetTime(state.resetsAt)}.`
+    `spare10 — into your ${config.reserve}% reserve · ` +
+    `${remaining(state.pct ?? 0)}% of quota left · resets ${formatResetTime(state.resetsAt)}`
   );
 }
 
@@ -74,8 +81,8 @@ export function isTripped(state: State, config: RunConfig, now: number): boolean
  */
 export function noticeText(state: State, config: RunConfig): string {
   return (
-    `${quotaSummary(state, config)} The agent will pause safely at its first tool call, ` +
-    `between operations — nothing will be left half-written.`
+    `${quotaSummary(state, config)}\nThe agent will pause safely at its first tool call — ` +
+    `between operations, with nothing left half-written.`
   );
 }
 
@@ -101,10 +108,10 @@ export function decide({ state, config, now, permissionMode }: DecideInput): Dec
     return {
       kind: 'deny',
       reason:
-        `${reasonText(state, config)} Stop now and wait for the user. ` +
+        `${reasonText(state, config)}. Stop now and wait for the user. ` +
         `Do not call any further tools.`,
     };
   }
 
-  return { kind: 'ask', reason: `${reasonText(state, config)} Continue anyway?` };
+  return { kind: 'ask', reason: reasonText(state, config) };
 }

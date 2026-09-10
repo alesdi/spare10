@@ -65,7 +65,7 @@ describe('gate', () => {
       hookEventName: 'PreToolUse',
       permissionDecision: 'ask',
     });
-    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of the 5-hour window left');
+    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of quota left');
     expect(readState(dir).awaitingApproval).toBe(true);
   });
 

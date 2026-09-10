@@ -13,9 +13,11 @@ import { BLIND_DEBOUNCE, DEFAULT_RESERVE, tripPoint, type RunConfig, type State 
 export function advanceState(prev: State, payload: StatuslinePayload, now: number): State {
   const window = payload.fiveHour;
 
+  const tick = prev.tick + 1;
+
   if (!window) {
     const missingStreak = prev.missingStreak + 1;
-    return { ...prev, missingStreak, blind: missingStreak >= BLIND_DEBOUNCE };
+    return { ...prev, tick, missingStreak, blind: missingStreak >= BLIND_DEBOUNCE };
   }
 
   // A changed reset timestamp means a new 5-hour window: re-arm everything.
@@ -23,6 +25,7 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
     window.resetsAt !== null && prev.resetsAt !== null && window.resetsAt !== prev.resetsAt;
 
   return {
+    tick,
     pct: window.usedPercentage,
     resetsAt: window.resetsAt,
     updatedAt: now,
@@ -34,8 +37,16 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
   };
 }
 
-/** SGR 5. Terminals that do not implement blink typically render it as bold or ignore it. */
-const blink = (text: string) => `\u001b[5m${text}\u001b[25m`;
+/**
+ * Orange, and a pulse driven by our own render cadence.
+ *
+ * SGR 5 (blink) is ignored by most terminals, so the icon is alternated with a same-width
+ * space on each sensor run instead. The sensor fires once per refresh interval, so the
+ * tick counter alternates reliably no matter how the terminal feels about blinking.
+ */
+const ORANGE = '\u001b[38;5;208m';
+const RESET = '\u001b[39m';
+const orange = (text: string) => `${ORANGE}${text}${RESET}`;
 
 /**
  * The status line stays empty until the reserve is reached — spare10 is invisible until
@@ -56,7 +67,8 @@ export function renderBadge(state: State, config: RunConfig, now: number): strin
     const reserve = config.reserve === DEFAULT_RESERVE ? '' : ` (${config.reserve}%)`;
     return `▶ spare10${reserve}`;
   }
-  return `${blink('⚠')} Pausing at next tool call`;
+  const icon = state.tick % 2 === 0 ? '⚠' : ' ';
+  return orange(`${icon} Pausing at next tool call`);
 }
 
 /** Run the user's original statusLine command with the untouched payload on its stdin. */

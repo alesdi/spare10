@@ -16,6 +16,8 @@ export interface State {
   pausePromptInjected: boolean;
   /** Set when the gate emitted an `ask`; PostToolUse reads it as the approval signal. */
   awaitingApproval: boolean;
+  /** Increments once per sensor run. Drives the status line pulse. */
+  tick: number;
 }
 
 /** Per-run configuration, written by the launcher and read by sensor/gate/post. */
@@ -41,6 +43,7 @@ export const DEFAULT_STATE: State = {
   disarmedUntil: null,
   pausePromptInjected: false,
   awaitingApproval: false,
+  tick: 0,
 };
 
 /** The reserve the tool is named after. Shown in the status line only when overridden. */

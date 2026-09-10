@@ -74,9 +74,13 @@ you'd expect.
 with a fifth of the window still in hand. It takes whole numbers only: Claude Code reports
 quota in integer percentages, so `--reserve 10.5` is rejected rather than silently rounded.
 
-The status line shows nothing until the reserve is reached, then a blinking
-`⚠ Pausing at next tool call`. Once you have consented it drops back to a quiet `▶ spare10`,
-with a non-default reserve spelled out as `▶ spare10 (20%)` — the name already accounts for 10.
+The status line shows nothing until the reserve is reached, then an orange
+`⚠ Pausing at next tool call`, its icon pulsing once per refresh. Once you have consented it
+drops back to a quiet `▶ spare10`, with a non-default reserve spelled out as `▶ spare10 (20%)`
+— the name already accounts for 10.
+
+The pulse is driven by spare10's own render cadence rather than the ANSI blink attribute,
+which most terminals ignore.
 
 Consenting at the pre-flight prompt counts for the whole window: the session starts disarmed
 rather than asking the same question again on the first tool call.
@@ -159,7 +163,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 119 tests: unit, plus the hooks as real subprocesses
+npm test          # 122 tests: unit, plus the hooks as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

@@ -69,9 +69,11 @@ describe('decide — tripped behaviour', () => {
     const decision = run(tripped());
     expect(decision.kind).toBe('ask');
     if (decision.kind !== 'ask') return;
-    expect(decision.reason).toContain('8% of the 5-hour window left');
-    expect(decision.reason).toContain('10% reserve');
-    expect(decision.reason).toMatch(/resets at \d{1,2}:\d{2}/i);
+    expect(decision.reason).toContain('8% of quota left');
+    expect(decision.reason).toContain('into your 10% reserve');
+    // Claude Code asks "Do you want to proceed?" directly below it; do not ask twice.
+    expect(decision.reason).not.toContain('Continue anyway?');
+    expect(decision.reason).toMatch(/resets \d{1,2}:\d{2}/i);
   });
 
   it('injects the pause prompt instead of asking, when one is configured', () => {
@@ -79,7 +81,7 @@ describe('decide — tripped behaviour', () => {
     expect(decision.kind).toBe('inject');
     if (decision.kind !== 'inject') return;
     expect(decision.text).toContain('Commit and stop.');
-    expect(decision.text).toContain('8% of the 5-hour window left');
+    expect(decision.text).toContain('8% of quota left');
   });
 
   it('does not re-inject a pause prompt that already fired', () => {
@@ -123,7 +125,7 @@ describe('isTripped and noticeText', () => {
   it('explains that the pause happens between operations, not mid-write', () => {
     const notice = noticeText(tripped(), config());
     expect(notice).toContain('pause safely at its first tool call');
-    expect(notice).toContain('nothing will be left half-written');
+    expect(notice).toContain('nothing left half-written');
   });
 });
 

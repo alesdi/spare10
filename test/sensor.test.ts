@@ -51,6 +51,11 @@ describe('advanceState', () => {
     expect(next).toMatchObject({ pct: 42, resetsAt: 1000, updatedAt: 500, blind: false });
   });
 
+  it('advances the pulse on every run, reading or not', () => {
+    expect(advanceState(state({ tick: 7 }), reading(42), 500).tick).toBe(8);
+    expect(advanceState(state({ tick: 7 }), parseStatuslinePayload('{}'), 500).tick).toBe(8);
+  });
+
   it('goes blind only after three consecutive missing payloads', () => {
     const missing = parseStatuslinePayload('{}');
     let current = state({ pct: 4, updatedAt: 100 });
@@ -96,10 +101,21 @@ describe('renderBadge', () => {
     expect(stripAnsi(badge)).toBe('⚠ Pausing at next tool call');
   });
 
-  it('blinks the icon, and only the icon', () => {
-    const badge = renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0);
-    expect(badge.startsWith('\u001b[5m⚠\u001b[25m')).toBe(true);
-    expect(badge).not.toContain('\u001b[5mPausing');
+  it('pulses by alternating the icon on each sensor run', () => {
+    // SGR 5 is ignored by most terminals, so the pulse is driven by our own render cadence.
+    const even = stripAnsi(renderBadge(state({ pct: 90, tick: 0 }), DEFAULT_CONFIG, 0));
+    const odd = stripAnsi(renderBadge(state({ pct: 90, tick: 1 }), DEFAULT_CONFIG, 0));
+    expect(even).toBe('⚠ Pausing at next tool call');
+    expect(odd).toBe('  Pausing at next tool call');
+    expect(even.length).toBe(odd.length); // same width, so the text never shifts
+  });
+
+  it('renders the warning in orange', () => {
+    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toContain('\u001b[38;5;208m');
+  });
+
+  it('does not use SGR 5, which most terminals ignore', () => {
+    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).not.toContain('\u001b[5m');
   });
 
   it('goes quiet-but-present once disarmed', () => {
@@ -113,8 +129,9 @@ describe('renderBadge', () => {
     expect(badge).toBe('▶ spare10 (99%)');
   });
 
-  it('does not blink the blind warning, which is not urgent', () => {
-    expect(renderBadge(state({ blind: true }), DEFAULT_CONFIG, 0)).not.toContain('\u001b[5m');
+  it('leaves the blind warning plain, since it is not urgent', () => {
+    const badge = renderBadge(state({ blind: true }), DEFAULT_CONFIG, 0);
+    expect(badge).toBe('⚠ spare10 quota unavailable');
   });
 
   it('warns when the sensor is blind', () => {

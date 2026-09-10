@@ -41,6 +41,7 @@ export function readState(runDir: string): State {
     disarmedUntil: num(raw['disarmedUntil'], null),
     pausePromptInjected: bool(raw['pausePromptInjected'], false),
     awaitingApproval: bool(raw['awaitingApproval'], false),
+    tick: num(raw['tick'], 0) ?? 0,
   };
 }
 
