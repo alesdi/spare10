@@ -6,21 +6,21 @@ import { parseArgs, UsageError } from '../src/args';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
-  it('defaults to a 90% threshold and no pause prompt', () => {
+  it('defaults to a 10% reserve and no pause prompt', () => {
     const { config, command } = parseArgs(['claude']);
-    expect(config).toMatchObject({ threshold: 90, pausePrompt: null, refresh: 5, badge: true });
+    expect(config).toMatchObject({ reserve: 10, pausePrompt: null, refresh: 5, badge: true });
     expect(command).toEqual(['claude']);
   });
 
   it('passes everything after the command through untouched', () => {
-    const { command } = parseArgs(['--threshold', '85', 'claude', '--resume', '-p', 'hi']);
+    const { command } = parseArgs(['--reserve', '15', 'claude', '--resume', '-p', 'hi']);
     expect(command).toEqual(['claude', '--resume', '-p', 'hi']);
   });
 
   it('does not consume flags that belong to the wrapped command', () => {
-    const { config, command } = parseArgs(['claude', '--threshold', '10']);
-    expect(config.threshold).toBe(90);
-    expect(command).toEqual(['claude', '--threshold', '10']);
+    const { config, command } = parseArgs(['claude', '--reserve', '40']);
+    expect(config.reserve).toBe(10);
+    expect(command).toEqual(['claude', '--reserve', '40']);
   });
 
   it('keeps a multi-line pause prompt intact', () => {
@@ -28,16 +28,20 @@ describe('parseArgs', () => {
     expect(parseArgs(['--pause-prompt', prompt, 'claude']).config.pausePrompt).toBe(prompt);
   });
 
-  it('rejects a fractional threshold rather than silently flooring it', () => {
-    // used_percentage is an integer, so 90.5 could never be observed.
-    expect(() => parseArgs(['--threshold', '90.5', 'claude'])).toThrow(/whole number/);
+  it('rejects a fractional reserve rather than silently flooring it', () => {
+    // used_percentage is an integer, so 10.5 could never be observed.
+    expect(() => parseArgs(['--reserve', '10.5', 'claude'])).toThrow(/whole number/);
   });
 
-  it.each([['0'], ['100'], ['-5']])('rejects an out-of-range threshold: %s', (value) => {
-    expect(() => parseArgs(['--threshold', value, 'claude'])).toThrow(UsageError);
+  it.each([['0'], ['100'], ['-5']])('rejects an out-of-range reserve: %s', (value) => {
+    expect(() => parseArgs(['--reserve', value, 'claude'])).toThrow(UsageError);
   });
 
-  it.each([['--threshold'], ['--pause-prompt'], ['--refresh']])(
+  it('points the old --threshold flag at its replacement', () => {
+    expect(() => parseArgs(['--threshold', '90', 'claude'])).toThrow(/--reserve 10/);
+  });
+
+  it.each([['--reserve'], ['--pause-prompt'], ['--refresh']])(
     'rejects %s with no value',
     (flag) => {
       expect(() => parseArgs([flag])).toThrow(/requires a value/);

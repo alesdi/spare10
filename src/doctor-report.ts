@@ -99,7 +99,7 @@ export function runDoctor(): number {
   const verdict = diagnose(state, config, now);
 
   out(`Latest run  ${runDir}`);
-  out(`  ${MARK.info} threshold     ${config.threshold}%`);
+  out(`  ${MARK.info} reserve       ${config.reserve}% of the 5-hour window`);
   out(
     `  ${MARK.info} on trip       ${
       config.pausePrompt === null
@@ -110,7 +110,7 @@ export function runDoctor(): number {
   out(`  ${MARK.info} refresh       ${config.refresh}s`);
 
   if (state.pct !== null && state.updatedAt !== null) {
-    out(`  ${MARK.ok} quota         ${state.pct}% of the 5-hour window`);
+    out(`  ${MARK.ok} quota         ${state.pct}% used, ${100 - state.pct}% left`);
     out(`  ${MARK.info} last reading  ${formatDuration(now - state.updatedAt)} ago`);
   }
   if (state.resetsAt !== null) {

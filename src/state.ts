@@ -65,10 +65,10 @@ export function writeState(runDir: string, state: State): void {
 export function readRunConfig(runDir: string): RunConfig {
   const raw = readJson(configPath(runDir));
   if (!raw) return { ...DEFAULT_CONFIG };
-  const threshold = num(raw['threshold'], DEFAULT_CONFIG.threshold) ?? DEFAULT_CONFIG.threshold;
+  const reserve = num(raw['reserve'], DEFAULT_CONFIG.reserve) ?? DEFAULT_CONFIG.reserve;
   const refresh = num(raw['refresh'], DEFAULT_CONFIG.refresh) ?? DEFAULT_CONFIG.refresh;
   return {
-    threshold: Math.min(99, Math.max(1, Math.round(threshold))),
+    reserve: Math.min(99, Math.max(1, Math.round(reserve))),
     pausePrompt: typeof raw['pausePrompt'] === 'string' && raw['pausePrompt'] ? raw['pausePrompt'] : null,
     refresh: Math.max(1, Math.round(refresh)),
     badge: bool(raw['badge'], DEFAULT_CONFIG.badge),

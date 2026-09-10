@@ -1,8 +1,8 @@
 # spare10
 
-**A circuit breaker for Claude Code.** It watches your 5-hour quota and stops the agent at a
-threshold you choose — while you still have budget left to steer it — instead of letting the
-session die mid-edit.
+**A circuit breaker for Claude Code.** It keeps a slice of your 5-hour quota in reserve and
+stops the agent before that reserve is spent — so you still have budget left to steer it,
+instead of the session dying mid-edit.
 
 ```
 spare10 claude
@@ -23,10 +23,11 @@ spare10 spends the last slice of your quota on **you**.
 
 ## What it does
 
-At the threshold (90% by default) it hands control back:
+When usage starts eating the reserve (the last 10% by default) it hands control back:
 
 ```
-⏸ spare10 — 5-hour quota at 91% (threshold 90%). Window resets at 14:00. Continue anyway?
+spare10 — 9% of the 5-hour window left, which is your 10% reserve.
+Resets at 14:00. Continue anyway?
   ❯ Yes    No (Esc)
 ```
 
@@ -59,7 +60,7 @@ curl -fsSL https://raw.githubusercontent.com/alesdi/spare10/main/install.sh | sh
 ```
 spare10 [options] <command> [args...]
 
-  --threshold <1-99>     Trip at this percentage of the 5-hour window (default: 90)
+  --reserve <1-99>       Keep this much of the 5-hour window back for yourself (default: 10)
   --pause-prompt <text>  Inject this instruction instead of asking
   --refresh <seconds>    Quota poll interval, also the staleness unit (default: 5)
   --no-badge             Never draw the spare10 marker in the status line
@@ -69,8 +70,12 @@ spare10 [options] <command> [args...]
 Everything after the command passes through untouched, so `spare10 claude --resume` works as
 you'd expect.
 
-`--threshold` takes whole numbers only. Claude Code reports quota in integer percentages, so
-`--threshold 90.5` is rejected rather than silently rounded.
+`--reserve` is the quota you keep, not the level that trips — `--reserve 20` stops the agent
+with a fifth of the window still in hand. It takes whole numbers only: Claude Code reports
+quota in integer percentages, so `--reserve 10.5` is rejected rather than silently rounded.
+
+The status line shows nothing until the reserve is reached, then `⏸ spare10`. A non-default
+reserve is spelled out — `⏸ spare10 (20%)` — since the name already accounts for 10.
 
 ## How it works
 
@@ -96,7 +101,7 @@ spare10 is gone.
 **Your existing setup keeps working.** Hooks merge across settings levels, so your own hooks
 still fire. The status line does *not* merge — ours replaces it — so spare10 runs your
 original status line command with the untouched payload and prints its output. If you have
-none, spare10 draws nothing at all below the threshold.
+none, spare10 draws nothing at all until the reserve is reached.
 
 **It fails open, always.** No reading, a stale reading, a plan that doesn't report
 `rate_limits`, a corrupt state file, a missing run directory — every one of those lets the
@@ -113,9 +118,9 @@ Not in this version, deliberately:
 - **The weekly limit.** Only the 5-hour window is watched.
 - **Auto-resume** when the window resets.
 - **Model downgrade** (Opus → Sonnet) as an alternative to stopping.
-- **Overshoot correction.** The threshold is indicative, not predictive: readings land at 1%
+- **Overshoot correction.** The reserve is indicative, not predictive: readings land at 1%
   granularity and up to one refresh interval late, and parallel subagents can land several
-  requests at once. Set it with headroom.
+  requests at once. Keep back more than you think you need.
 - **Coordination across sessions.** Quota is account-wide, but each run tracks its own state.
 
 ## Known limitations
@@ -131,7 +136,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 93 tests: unit, plus gate/post as real subprocesses
+npm test          # 96 tests: unit, plus gate/post as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

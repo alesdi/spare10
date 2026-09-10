@@ -13,7 +13,7 @@ export const USAGE = `spare10 — pause Claude Code before the 5-hour quota runs
   spare10 [options] <command> [args...]
 
 Options:
-  --threshold <1-99>    Trip at this percentage of the 5-hour window (default: 90)
+  --reserve <1-99>      Keep this much of the 5-hour window back for yourself (default: 10)
   --pause-prompt <text> Instead of asking, inject this instruction into the running agent
   --refresh <seconds>   Status line poll interval, also the staleness unit (default: 5)
   --no-badge            Never draw the spare10 marker in the status line
@@ -24,19 +24,19 @@ Commands:
 
 Examples:
   spare10 claude
-  spare10 --threshold 85 claude
+  spare10 --reserve 15 claude
   spare10 --pause-prompt "Finish this block, commit, then stop." claude --resume`;
 
-function parseThreshold(raw: string): number {
+function parseReserve(raw: string): number {
   if (!/^\d+$/.test(raw)) {
     throw new UsageError(
-      `--threshold must be a whole number: the API reports quota in integer percentages, ` +
+      `--reserve must be a whole number: the API reports quota in integer percentages, ` +
         `so "${raw}" cannot be honoured.`,
     );
   }
   const value = Number(raw);
   if (value < 1 || value > 99) {
-    throw new UsageError(`--threshold must be between 1 and 99, got ${value}.`);
+    throw new UsageError(`--reserve must be between 1 and 99, got ${value}.`);
   }
   return value;
 }
@@ -51,7 +51,7 @@ function parseRefresh(raw: string): number {
 /** Flags are consumed up to the first non-flag token; everything from there is the command. */
 export function parseArgs(argv: string[]): ParsedArgs {
   const config = {
-    threshold: DEFAULT_CONFIG.threshold,
+    reserve: DEFAULT_CONFIG.reserve,
     pausePrompt: DEFAULT_CONFIG.pausePrompt,
     refresh: DEFAULT_CONFIG.refresh,
     badge: DEFAULT_CONFIG.badge,
@@ -70,9 +70,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if (!token.startsWith('-')) break;
 
     switch (token) {
-      case '--threshold':
-        config.threshold = parseThreshold(next(token));
+      case '--reserve':
+        config.reserve = parseReserve(next(token));
         break;
+      case '--threshold':
+        // spare10 talks in reserve, not usage. Point people at the flag that exists.
+        throw new UsageError(
+          `--threshold was replaced by --reserve, which is the quota kept back rather than ` +
+            `the level that trips. "--threshold 90" is now "--reserve 10".`,
+        );
       case '--pause-prompt':
         config.pausePrompt = next(token);
         break;

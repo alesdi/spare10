@@ -20,8 +20,8 @@ export interface State {
 
 /** Per-run configuration, written by the launcher and read by sensor/gate/post. */
 export interface RunConfig {
-  /** Trip at or above this integer percentage. */
-  threshold: number;
+  /** Percentage of the 5-hour window held back for the human. Trips once usage eats into it. */
+  reserve: number;
   /** Non-blocking instruction injected on trip instead of asking. */
   pausePrompt: string | null;
   /** statusLine refreshInterval in seconds; also the staleness unit. */
@@ -43,8 +43,11 @@ export const DEFAULT_STATE: State = {
   awaitingApproval: false,
 };
 
+/** The reserve the tool is named after. Shown in the status line only when overridden. */
+export const DEFAULT_RESERVE = 10;
+
 export const DEFAULT_CONFIG: RunConfig = {
-  threshold: 90,
+  reserve: DEFAULT_RESERVE,
   pausePrompt: null,
   refresh: 5,
   badge: true,
@@ -59,3 +62,13 @@ export const STALE_REFRESH_MULTIPLE = 3;
 
 /** Fallback disarm span when resets_at is unknown, in seconds. */
 export const FALLBACK_DISARM_SECONDS = 3600;
+
+/** Usage percentage at which the reserve starts being consumed. */
+export function tripPoint(config: Pick<RunConfig, 'reserve'>): number {
+  return 100 - config.reserve;
+}
+
+/** Quota still untouched, as a percentage. */
+export function remaining(pct: number): number {
+  return 100 - pct;
+}

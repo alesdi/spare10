@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { parseStatuslinePayload, type StatuslinePayload } from './payload';
 import { readRunConfig, readState, writeState, nowSeconds } from './state';
-import { BLIND_DEBOUNCE, type RunConfig, type State } from './types';
+import { BLIND_DEBOUNCE, DEFAULT_RESERVE, tripPoint, type RunConfig, type State } from './types';
 
 /**
  * Fold one statusline payload into the persisted state.
@@ -35,20 +35,18 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
 }
 
 /**
- * The status line stays empty below the threshold — spare10 is meant to be invisible until
+ * The status line stays empty until the reserve is reached — spare10 is invisible until
  * it has something to say. `spare10 doctor` is the "is it running?" affordance.
  */
 export function renderBadge(state: State, config: RunConfig, now: number): string {
   if (!config.badge) return '';
   if (state.blind) return '⚠ spare10 quota unavailable';
-  if (state.pct === null || state.pct < config.threshold) return '';
+  if (state.pct === null || state.pct < tripPoint(config)) return '';
 
-  // Say what the number measures. A bare "spare10 15%" reads as though it could be headroom,
-  // and gives no hint why a low-looking figure has tripped the breaker.
+  // The name already says 10, so the reserve is only worth spelling out when it is not 10.
+  const reserve = config.reserve === DEFAULT_RESERVE ? '' : ` (${config.reserve}%)`;
   const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
-  return disarmed
-    ? `▶ spare10 quota ${state.pct}%`
-    : `⏸ spare10 quota ${state.pct}% (limit ${config.threshold}%)`;
+  return `${disarmed ? '▶' : '⏸'} spare10${reserve}`;
 }
 
 /** Run the user's original statusLine command with the untouched payload on its stdin. */

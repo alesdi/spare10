@@ -1,4 +1,4 @@
-import { STALE_REFRESH_MULTIPLE, type RunConfig, type State } from './types';
+import { remaining, STALE_REFRESH_MULTIPLE, tripPoint, type RunConfig, type State } from './types';
 
 export type Diagnosis =
   | { status: 'no-data'; detail: string }
@@ -23,12 +23,12 @@ export function diagnose(state: State, config: RunConfig, now: number): Diagnosi
   if (state.disarmedUntil !== null && now < state.disarmedUntil) {
     return { status: 'disarmed', detail: `consent given; quiet until ${formatClock(state.disarmedUntil)}` };
   }
-  if (state.pct >= config.threshold) {
-    return { status: 'tripped', detail: `at or above the ${config.threshold}% threshold` };
+  if (state.pct >= tripPoint(config)) {
+    return { status: 'tripped', detail: `into the ${config.reserve}% reserve` };
   }
   return {
     status: 'armed',
-    detail: `${config.threshold - state.pct} points of headroom before the threshold`,
+    detail: `${remaining(state.pct)}% left, of which ${config.reserve}% is reserved`,
   };
 }
 

@@ -23,8 +23,10 @@ describe('diagnose', () => {
     expect(diagnose(input, DEFAULT_CONFIG, NOW).status).toBe(expected);
   });
 
-  it('reports remaining headroom while armed', () => {
-    expect(diagnose(state({ pct: 72 }), DEFAULT_CONFIG, NOW).detail).toContain('18 points');
+  it('reports what is left, and how much of it is reserved', () => {
+    const detail = diagnose(state({ pct: 72 }), DEFAULT_CONFIG, NOW).detail;
+    expect(detail).toContain('28% left');
+    expect(detail).toContain('10% is reserved');
   });
 
   it('describes staleness as an ended session rather than a fault', () => {
@@ -32,7 +34,7 @@ describe('diagnose', () => {
     expect(verdict.detail).toContain('no active session');
   });
 
-  it('agrees with the threshold boundary used by the gate', () => {
+  it('agrees with the boundary used by the gate', () => {
     expect(diagnose(state({ pct: 89 }), DEFAULT_CONFIG, NOW).status).toBe('armed');
     expect(diagnose(state({ pct: 90 }), DEFAULT_CONFIG, NOW).status).toBe('tripped');
   });

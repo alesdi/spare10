@@ -17,7 +17,7 @@ function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string
   const dir = mkdtempSync(join(tmpdir(), 'spare10-gate-'));
   writeFileSync(
     join(dir, 'config.json'),
-    JSON.stringify({ threshold: 90, pausePrompt: null, refresh: 5, badge: true, chain: null, ...config }),
+    JSON.stringify({ reserve: 10, pausePrompt: null, refresh: 5, badge: true, chain: null, ...config }),
   );
   writeFileSync(
     join(dir, 'state.json'),
@@ -63,7 +63,7 @@ describe('gate', () => {
       hookEventName: 'PreToolUse',
       permissionDecision: 'ask',
     });
-    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('93%');
+    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of the 5-hour window left');
     expect(readState(dir).awaitingApproval).toBe(true);
   });
 

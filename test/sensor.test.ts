@@ -85,24 +85,22 @@ describe('advanceState', () => {
 });
 
 describe('renderBadge', () => {
-  it('is empty below the threshold', () => {
+  it('is empty while the reserve is untouched', () => {
     expect(renderBadge(state({ pct: 42 }), DEFAULT_CONFIG, 0)).toBe('');
   });
 
-  it('names what the percentage measures, and why it tripped', () => {
-    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toBe(
-      '⏸ spare10 quota 90% (limit 90%)',
-    );
+  it('says only its own name at the default reserve, which the name already states', () => {
+    expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).toBe('⏸ spare10');
   });
 
-  it('explains a trip that looks surprising against a low threshold', () => {
-    const badge = renderBadge(state({ pct: 15 }), { ...DEFAULT_CONFIG, threshold: 1 }, 0);
-    expect(badge).toBe('⏸ spare10 quota 15% (limit 1%)');
+  it('spells out a reserve that is not the default', () => {
+    const badge = renderBadge(state({ pct: 99 }), { ...DEFAULT_CONFIG, reserve: 99 }, 0);
+    expect(badge).toBe('⏸ spare10 (99%)');
   });
 
-  it('drops the limit once disarmed, since it is no longer the reason for anything', () => {
+  it('switches the icon once disarmed', () => {
     expect(renderBadge(state({ pct: 95, disarmedUntil: 100 }), DEFAULT_CONFIG, 50)).toBe(
-      '▶ spare10 quota 95%',
+      '▶ spare10',
     );
   });
 

@@ -1,4 +1,4 @@
-import { STALE_REFRESH_MULTIPLE, type RunConfig, type State } from './types';
+import { remaining, STALE_REFRESH_MULTIPLE, tripPoint, type RunConfig, type State } from './types';
 
 /**
  * Permission modes in which Claude Code will not surface an `ask` dialog to a human.
@@ -30,8 +30,8 @@ export function formatResetTime(resetsAt: number | null): string {
 
 function reasonText(state: State, config: RunConfig): string {
   return (
-    `spare10 — 5-hour quota at ${state.pct}% (threshold ${config.threshold}%). ` +
-    `Window resets at ${formatResetTime(state.resetsAt)}.`
+    `spare10 — ${remaining(state.pct ?? 0)}% of the 5-hour window left, ` +
+    `which is your ${config.reserve}% reserve. Resets at ${formatResetTime(state.resetsAt)}.`
   );
 }
 
@@ -47,7 +47,7 @@ export function decide({ state, config, now, permissionMode }: DecideInput): Dec
   if (state.blind) return PASS;
   if (now - state.updatedAt > config.refresh * STALE_REFRESH_MULTIPLE) return PASS;
   if (state.disarmedUntil !== null && now < state.disarmedUntil) return PASS;
-  if (state.pct < config.threshold) return PASS;
+  if (state.pct < tripPoint(config)) return PASS;
 
   if (config.pausePrompt !== null && !state.pausePromptInjected) {
     return { kind: 'inject', text: `${reasonText(state, config)}\n\n${config.pausePrompt}` };

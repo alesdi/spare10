@@ -32,12 +32,18 @@ describe('decide — fail-open branches', () => {
     expect(run(state).kind).toBe('pass');
   });
 
-  it('passes below the threshold', () => {
+  it('passes while the reserve is untouched', () => {
     expect(run(tripped({ pct: 89 })).kind).toBe('pass');
   });
 
-  it('trips exactly at the threshold, not one above it', () => {
+  it('trips on the first point of the reserve, not one past it', () => {
     expect(run(tripped({ pct: 90 })).kind).toBe('ask');
+  });
+
+  it('follows a non-default reserve', () => {
+    const wide = config({ reserve: 40 });
+    expect(decide({ state: tripped({ pct: 59 }), config: wide, now: NOW, permissionMode: 'default' }).kind).toBe('pass');
+    expect(decide({ state: tripped({ pct: 60 }), config: wide, now: NOW, permissionMode: 'default' }).kind).toBe('ask');
   });
 
   it('re-arms once the disarm window has elapsed', () => {
@@ -54,8 +60,8 @@ describe('decide — tripped behaviour', () => {
     const decision = run(tripped());
     expect(decision.kind).toBe('ask');
     if (decision.kind !== 'ask') return;
-    expect(decision.reason).toContain('92%');
-    expect(decision.reason).toContain('threshold 90%');
+    expect(decision.reason).toContain('8% of the 5-hour window left');
+    expect(decision.reason).toContain('10% reserve');
     expect(decision.reason).toMatch(/resets at \d{1,2}:\d{2}/i);
   });
 
@@ -64,7 +70,7 @@ describe('decide — tripped behaviour', () => {
     expect(decision.kind).toBe('inject');
     if (decision.kind !== 'inject') return;
     expect(decision.text).toContain('Commit and stop.');
-    expect(decision.text).toContain('92%');
+    expect(decision.text).toContain('8% of the 5-hour window left');
   });
 
   it('does not re-inject a pause prompt that already fired', () => {
