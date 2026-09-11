@@ -38,19 +38,28 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
 }
 
 /**
- * Orange, and a pulse driven by our own render cadence.
+ * Colours, and a pulse driven by our own render cadence.
  *
  * SGR 5 (blink) is ignored by most terminals, so the icon is alternated with a same-width
  * space on each sensor run instead. The sensor fires once per refresh interval, so the
  * tick counter alternates reliably no matter how the terminal feels about blinking.
  */
 const ORANGE = '\u001b[38;5;208m';
+const GREEN = '\u001b[38;5;40m';
+const GRAY = '\u001b[38;5;245m';
 const RESET = '\u001b[39m';
 const orange = (text: string) => `${ORANGE}${text}${RESET}`;
+const green = (text: string) => `${GREEN}${text}${RESET}`;
+const gray = (text: string) => `${GRAY}${text}${RESET}`;
+
+/** The name already says 10, so the reserve is only spelled out when it is not 10. */
+const label = (config: RunConfig) =>
+  config.reserve === DEFAULT_RESERVE ? 'spare10' : `spare10 (${config.reserve}%)`;
 
 /**
- * The status line stays empty until the reserve is reached — spare10 is invisible until
- * it has something to say. `spare10 doctor` is the "is it running?" affordance.
+ * A small coloured marker says at a glance which state the breaker is in: gray while waiting
+ * for the first reading, green while the reserve is untouched, orange once you have consented
+ * to eat into it, and the pulsing warning in between. `spare10 doctor` remains the deeper "is it wired up?" affordance.
  *
  * This is the only channel that reliably reaches the user mid-session: a hook's plain output
  * becomes context for the model, which paraphrases it, and its one user-visible path is exit
@@ -59,14 +68,12 @@ const orange = (text: string) => `${ORANGE}${text}${RESET}`;
 export function renderBadge(state: State, config: RunConfig, now: number): string {
   if (!config.badge) return '';
   if (state.blind) return '⚠ spare10 quota unavailable';
-  if (state.pct === null || state.pct < tripPoint(config)) return '';
+  if (state.pct === null) return gray(`⧗ ${label(config)}`);
+  if (state.pct < tripPoint(config)) return green(`● ${label(config)}`);
 
   const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
-  if (disarmed) {
-    // The name already says 10, so the reserve is only spelled out when it is not 10.
-    const reserve = config.reserve === DEFAULT_RESERVE ? '' : ` (${config.reserve}%)`;
-    return `▶ spare10${reserve}`;
-  }
+  if (disarmed) return orange(`⨯ ${label(config)}`);
+
   const icon = state.tick % 2 === 0 ? '⚠' : ' ';
   return orange(`${icon} Pausing at next tool call`);
 }

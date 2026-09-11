@@ -92,8 +92,26 @@ describe('advanceState', () => {
 });
 
 describe('renderBadge', () => {
-  it('is empty while the reserve is untouched', () => {
-    expect(renderBadge(state({ pct: 42 }), DEFAULT_CONFIG, 0)).toBe('');
+  it('shows a green marker while the reserve is untouched', () => {
+    const badge = renderBadge(state({ pct: 42 }), DEFAULT_CONFIG, 0);
+    expect(stripAnsi(badge)).toBe('● spare10');
+    expect(badge).toContain('\u001b[38;5;40m');
+  });
+
+  it('shows a gray hourglass before the first reading', () => {
+    const badge = renderBadge(state(), DEFAULT_CONFIG, 0);
+    expect(stripAnsi(badge)).toBe('⧗ spare10');
+    expect(badge).toContain('\u001b[38;5;245m');
+  });
+
+  it('spells out a non-default reserve while waiting', () => {
+    const badge = renderBadge(state(), { ...DEFAULT_CONFIG, reserve: 20 }, 0);
+    expect(stripAnsi(badge)).toBe('⧗ spare10 (20%)');
+  });
+
+  it('spells out a non-default reserve while armed', () => {
+    const badge = renderBadge(state({ pct: 42 }), { ...DEFAULT_CONFIG, reserve: 20 }, 0);
+    expect(stripAnsi(badge)).toBe('● spare10 (20%)');
   });
 
   it('says what is about to happen, not how much is left', () => {
@@ -118,15 +136,15 @@ describe('renderBadge', () => {
     expect(renderBadge(state({ pct: 90 }), DEFAULT_CONFIG, 0)).not.toContain('\u001b[5m');
   });
 
-  it('goes quiet-but-present once disarmed', () => {
-    expect(renderBadge(state({ pct: 95, disarmedUntil: 100 }), DEFAULT_CONFIG, 50)).toBe(
-      '▶ spare10',
-    );
+  it('goes quiet-but-present, in orange, once disarmed', () => {
+    const badge = renderBadge(state({ pct: 95, disarmedUntil: 100 }), DEFAULT_CONFIG, 50);
+    expect(stripAnsi(badge)).toBe('⨯ spare10');
+    expect(badge).toContain('\u001b[38;5;208m');
   });
 
   it('spells out a non-default reserve once disarmed', () => {
     const badge = renderBadge(state({ pct: 99, disarmedUntil: 100 }), { ...DEFAULT_CONFIG, reserve: 99 }, 50);
-    expect(badge).toBe('▶ spare10 (99%)');
+    expect(stripAnsi(badge)).toBe('⨯ spare10 (99%)');
   });
 
   it('leaves the blind warning plain, since it is not urgent', () => {
