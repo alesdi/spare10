@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs, UsageError } from '../src/args';
-import { haltVerdict, preflightVerdict, RESUME_PROMPT, resumable, resumeArgs } from '../src/launch';
+import { haltVerdict, pinSelf, preflightVerdict, RESUME_PROMPT, resumable, resumeArgs } from '../src/launch';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
@@ -88,6 +88,27 @@ describe('readChainTarget', () => {
 
   it('returns no target when the file does not exist', () => {
     expect(readChainTarget('/nonexistent/settings.json').command).toBeNull();
+  });
+});
+
+describe('pinSelf', () => {
+  it('copies the bundle into the run directory so an upgrade cannot change a live session', () => {
+    // The hook commands are frozen into --settings at launch; the installed bundle is not.
+    const runDir = mkdtempSync(join(tmpdir(), 'spare10-pin-'));
+    const install = join(mkdtempSync(join(tmpdir(), 'spare10-install-')), 'spare10.js');
+    writeFileSync(install, '// version under test');
+
+    const pinned = pinSelf(runDir, install);
+    expect(pinned).toBe(join(runDir, 'spare10.js'));
+    expect(readFileSync(pinned, 'utf8')).toBe('// version under test');
+
+    writeFileSync(install, '// upgraded');
+    expect(readFileSync(pinned, 'utf8')).toBe('// version under test');
+  });
+
+  it('falls back to the installed bundle when the copy cannot be made', () => {
+    const runDir = mkdtempSync(join(tmpdir(), 'spare10-pin-'));
+    expect(pinSelf(runDir, '/nonexistent/spare10.js')).toBe('/nonexistent/spare10.js');
   });
 });
 

@@ -6,6 +6,15 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- **Upgrading spare10 no longer breaks sessions already running.** The hook commands are
+  frozen into the `--settings` handed to Claude Code at launch, but they used to point at the
+  installed bundle, so replacing it mid-session made every hook run whatever the new version
+  understood — after 0.3.0 dropped the `post` subcommand, sessions started under 0.2.x
+  reported a `PostToolUse` "blocking error" on every tool call. Each run now keeps its own
+  copy of the bundle it was started with, in its run directory, and the hooks call that.
+
 ## [0.3.0] — 2026-09-14
 
 ### Changed

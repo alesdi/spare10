@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import {
   closeSync,
+  copyFileSync,
   mkdirSync,
   openSync,
   readSync,
@@ -132,6 +133,23 @@ function preflight(runDir: string, config: RunConfig): Preflight {
 
 export function selfPath(): string {
   return fileURLToPath(import.meta.url);
+}
+
+/**
+ * The bundle a run's hooks should execute. The hook commands live in the `--settings` handed
+ * to Claude Code, so a session that started under one version keeps calling it for its whole
+ * life; if the installed bundle is upgraded meanwhile, every hook would run a subcommand set
+ * that may no longer match. Each run therefore keeps its own copy of the bundle it was
+ * started with, next to its state. Falls back to the installed bundle if the copy fails.
+ */
+export function pinSelf(runDir: string, source: string = selfPath()): string {
+  const pinned = join(runDir, 'spare10.js');
+  try {
+    copyFileSync(source, pinned);
+    return pinned;
+  } catch {
+    return source;
+  }
 }
 
 /**
@@ -304,7 +322,7 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
   const settings = JSON.stringify(
     buildSettings({
       nodePath: process.execPath,
-      selfPath: selfPath(),
+      selfPath: pinSelf(runDir),
       runDir,
       refresh: config.refresh,
       padding: chain.padding,
