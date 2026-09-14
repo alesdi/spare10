@@ -6,6 +6,37 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **The hard pause now stops Claude Code and asks in the terminal.** When the reserve is
+  reached, the gate sends the Claude Code process `SIGTERM` at the next tool call — between
+  operations, with subagents and background tasks going down with it — and spare10 asks
+  `Resume anyway? [y/N]` on its own. `y` runs `claude --resume` on the same session with a
+  note to carry on; anything else leaves the session saved for later. This replaces the
+  permission dialog, which non-interactive modes auto-approved (so spare10 fell back to a
+  denial the model could retry around) and which piled up once per subagent. The
+  `PostToolUse` hook is gone with it. A session that cannot be resumed — `--no-session-persistence`,
+  or a run inside another Claude Code session — is denied rather than stopped.
+- `spare10 claude` now asks `Start anyway?` before starting into the reserve even when a
+  `--pause-prompt` is set, instead of silently proceeding. Launches without a terminal still
+  start without asking.
+- Once a `--pause-prompt` has gone out, the status line shows a steady orange `⏸ spare10`
+  instead of continuing to pulse `⚠ Pausing at next tool call`.
+
+### Added
+
+- `SPARE10_HOME` relocates spare10's state directory (default `~/.spare10`), for tests and
+  CI where earlier runs must not seed a new one.
+
+### Fixed
+
+- `--pause-prompt` is now delivered to every agent in the session — the main thread and each
+  subagent, on its own next tool call — instead of once to whichever agent happened to call
+  a tool first. Hook context only reaches the calling agent, so a subagent that tripped the
+  gate used to receive the instruction while the main thread ran on unconstrained, and vice
+  versa. The gate no longer disarms globally after injecting; each agent passes only once it
+  has been told.
+
 ## [0.2.0] — 2026-09-11
 
 ### Changed

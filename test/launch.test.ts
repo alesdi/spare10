@@ -3,7 +3,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs, UsageError } from '../src/args';
-import { preflightVerdict } from '../src/launch';
+import { haltVerdict, preflightVerdict, RESUME_PROMPT, resumable, resumeArgs } from '../src/launch';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
@@ -100,10 +100,10 @@ describe('buildSettings', () => {
     padding: 0,
   });
 
-  it('registers the gate and the approval signal, and nothing on prompt submit', () => {
+  it('registers the gate alone, and nothing on prompt submit', () => {
     // UserPromptSubmit has no user-visible non-blocking channel: stdout there is model
     // context, which the model paraphrases, and exit 2 erases what the user typed.
-    expect(Object.keys(settings['hooks'] as object)).toEqual(['PreToolUse', 'PostToolUse']);
+    expect(Object.keys(settings['hooks'] as object)).toEqual(['PreToolUse']);
   });
 
   it('invokes spare10 by absolute path, never through a package runner', () => {
@@ -144,23 +144,109 @@ describe('shellQuote', () => {
 
 describe('preflightVerdict', () => {
   it('says nothing when the reserve is untouched', () => {
-    expect(preflightVerdict(false, false, null)).toBe('clear');
+    expect(preflightVerdict(false, null)).toBe('clear');
   });
 
   it.each([['y'], ['Y'], ['yes'], ['  yes  ']])('treats %s as consent', (answer) => {
-    expect(preflightVerdict(true, false, answer)).toBe('consented');
+    expect(preflightVerdict(true, answer)).toBe('consented');
   });
 
   it.each([[''], ['n'], ['no'], ['anything else']])('treats %s as a refusal', (answer) => {
     // Empty means a bare Enter, which must not start a session that is already spent.
-    expect(preflightVerdict(true, false, answer)).toBe('declined');
-  });
-
-  it('never stalls an unattended run on a question', () => {
-    expect(preflightVerdict(true, true, null)).toBe('proceeding');
+    expect(preflightVerdict(true, answer)).toBe('declined');
   });
 
   it('starts when there is no terminal to ask', () => {
-    expect(preflightVerdict(true, false, null)).toBe('proceeding');
+    expect(preflightVerdict(true, null)).toBe('proceeding');
+  });
+});
+
+describe('haltVerdict', () => {
+  it.each([['y'], ['Yes']])('resumes on %s', (answer) => {
+    expect(haltVerdict(answer)).toBe('resume');
+  });
+
+  it.each([[''], ['n'], ['later']])('leaves the session stopped on %s', (answer) => {
+    expect(haltVerdict(answer)).toBe('declined');
+  });
+
+  it('knows when nobody was there to ask', () => {
+    expect(haltVerdict(null)).toBe('unattended');
+  });
+});
+
+describe('resumable', () => {
+  it('is the default', () => {
+    expect(resumable(['--model', 'opus'], {})).toBe(true);
+  });
+
+  it('is off when the user asked for no persistence', () => {
+    expect(resumable(['--no-session-persistence'], {})).toBe(false);
+  });
+
+  it('is off inside another Claude Code session, unless persistence is forced', () => {
+    expect(resumable([], { CLAUDE_CODE_CHILD_SESSION: '1' })).toBe(false);
+    expect(
+      resumable([], { CLAUDE_CODE_CHILD_SESSION: '1', CLAUDE_CODE_FORCE_SESSION_PERSISTENCE: '1' }),
+    ).toBe(true);
+  });
+});
+
+describe('resumeArgs', () => {
+  const resume = (args: string[]) => resumeArgs(args, 'sid');
+
+  it('points at the stopped session and asks it to carry on', () => {
+    expect(resume([])).toEqual(['--resume', 'sid', RESUME_PROMPT]);
+  });
+
+  it('keeps the flags the session was started with', () => {
+    expect(resume(['--model', 'opus', '--dangerously-skip-permissions', '--effort=high'])).toEqual([
+      '--resume', 'sid', '--model', 'opus', '--dangerously-skip-permissions', '--effort=high', RESUME_PROMPT,
+    ]);
+  });
+
+  it('drops the original prompt, which was delivered the first time', () => {
+    expect(resume(['Implement the parser', '--model', 'opus'])).toEqual([
+      '--resume', 'sid', '--model', 'opus', RESUME_PROMPT,
+    ]);
+  });
+
+  it('does not mistake a flag value for the prompt', () => {
+    expect(resume(['--append-system-prompt', 'Be terse'])).toEqual([
+      '--resume', 'sid', '--append-system-prompt', 'Be terse', RESUME_PROMPT,
+    ]);
+  });
+
+  it('keeps every value of a variadic flag', () => {
+    expect(resume(['--add-dir', '../a', '../b', '--model', 'opus'])).toEqual([
+      '--resume', 'sid', '--add-dir', '../a', '../b', '--model', 'opus', RESUME_PROMPT,
+    ]);
+  });
+
+  it('takes an optional value only when one is there', () => {
+    expect(resume(['--debug', 'api', '--verbose'])).toEqual([
+      '--resume', 'sid', '--debug', 'api', '--verbose', RESUME_PROMPT,
+    ]);
+    expect(resume(['--debug', '--verbose'])).toEqual(['--resume', 'sid', '--debug', '--verbose', RESUME_PROMPT]);
+  });
+
+  it.each([
+    [['--continue']],
+    [['-c']],
+    [['--resume']],
+    [['--resume', 'old-id']],
+    [['-r', 'old-id']],
+    [['--session-id', 'old-id']],
+    [['--worktree', 'feature']],
+    [['-w']],
+    [['--tmux']],
+  ])('replaces the way the session was chosen: %j', (args) => {
+    expect(resume([...args, '--model', 'opus'])).toEqual(['--resume', 'sid', '--model', 'opus', RESUME_PROMPT]);
+  });
+
+  it('drops everything after a bare --, which is all positional', () => {
+    expect(resume(['--model', 'opus', '--', 'do the thing'])).toEqual([
+      '--resume', 'sid', '--model', 'opus', RESUME_PROMPT,
+    ]);
   });
 });

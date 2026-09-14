@@ -37,16 +37,16 @@ describe('pickSeed', () => {
           resetsAt: NOW + 100,
           updatedAt: NOW - 10,
           disarmedUntil: NOW + 100,
-          pausePromptInjected: true,
-          awaitingApproval: true,
+          pausePromptInjectedTo: ['main'],
+          halted: 'abc',
         }),
       ],
       NOW,
     );
     expect(seed).toMatchObject({
       disarmedUntil: null,
-      pausePromptInjected: false,
-      awaitingApproval: false,
+      pausePromptInjectedTo: [],
+      halted: null,
     });
   });
 });

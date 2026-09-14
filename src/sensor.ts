@@ -32,8 +32,8 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
     missingStreak: 0,
     blind: false,
     disarmedUntil: rolledOver ? null : prev.disarmedUntil,
-    pausePromptInjected: rolledOver ? false : prev.pausePromptInjected,
-    awaitingApproval: rolledOver ? false : prev.awaitingApproval,
+    pausePromptInjectedTo: rolledOver ? [] : prev.pausePromptInjectedTo,
+    halted: prev.halted,
   };
 }
 
@@ -59,7 +59,8 @@ const label = (config: RunConfig) =>
 /**
  * A small coloured marker says at a glance which state the breaker is in: gray while waiting
  * for the first reading, green while the reserve is untouched, orange once you have consented
- * to eat into it, and the pulsing warning in between. `spare10 doctor` remains the deeper "is it wired up?" affordance.
+ * to eat into it, a steady pause mark once the pause prompt has gone out, and the pulsing
+ * warning in between. `spare10 doctor` remains the deeper "is it wired up?" affordance.
  *
  * This is the only channel that reliably reaches the user mid-session: a hook's plain output
  * becomes context for the model, which paraphrases it, and its one user-visible path is exit
@@ -73,6 +74,10 @@ export function renderBadge(state: State, config: RunConfig, now: number): strin
 
   const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
   if (disarmed) return orange(`⨯ ${label(config)}`);
+
+  // The pause prompt has gone out: the breaker is no longer *about* to pause — it has. (A hard
+  // stop needs no mark of its own; the process it would decorate is gone.)
+  if (state.pausePromptInjectedTo.length > 0) return orange(`⏸ ${label(config)}`);
 
   const icon = state.tick % 2 === 0 ? '⚠' : ' ';
   return orange(`${icon} Pausing at next tool call`);

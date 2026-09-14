@@ -14,7 +14,7 @@ export const USAGE = `spare10 — pause Claude Code before the 5-hour quota runs
 
 Options:
   --reserve <1-99>      Keep this much of the 5-hour window back for yourself (default: 10)
-  --pause-prompt <text> Instead of asking, inject this instruction into the running agent
+  --pause-prompt <text> Instead of stopping, inject this instruction into the running agent
   --refresh <seconds>   Status line poll interval, also the staleness unit (default: 5)
   --no-badge            Never draw the spare10 marker in the status line
   -h, --help            Show this message

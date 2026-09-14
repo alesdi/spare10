@@ -1,24 +1,25 @@
 import { remaining, STALE_REFRESH_MULTIPLE, tripPoint, type RunConfig, type State } from './types';
 
 /**
- * Permission modes in which Claude Code will not surface an `ask` dialog to a human.
- * In these, `ask` would be auto-approved and the circuit breaker would silently do nothing,
- * so we fall back to `deny`, which always blocks regardless of mode.
+ * `halt` stops the Claude Code process outright; the launcher then asks the human in the
+ * terminal and resumes the session if they say so. `reason` is what the model is told when the
+ * process cannot be stopped and the gate has to fall back to denying the call.
  */
-const NON_INTERACTIVE_MODES = new Set(['bypassPermissions', 'dontAsk']);
-
 export type Decision =
   | { kind: 'pass' }
   | { kind: 'inject'; text: string }
-  | { kind: 'ask'; reason: string }
-  | { kind: 'deny'; reason: string };
+  | { kind: 'halt'; reason: string };
 
 export interface DecideInput {
   state: State;
   config: RunConfig;
   now: number;
-  /** From the hook payload; null when we have not parsed stdin yet. */
-  permissionMode: string | null;
+  /**
+   * Which agent is calling (see `agentKey`); null when we have not parsed stdin yet. An
+   * unknown caller never counts as already injected, so the hot path cannot wave a subagent
+   * through on the main thread's behalf.
+   */
+  agent: string | null;
 }
 
 const PASS: Decision = { kind: 'pass' };
@@ -44,14 +45,7 @@ export function formatResetTime(resetsAt: number | null): string {
   return new Date(resetsAt * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
-/**
- * The one line every spare10 message opens with, so the wording never drifts.
- *
- * Kept terse on purpose: in the permission dialog this sits inside Claude Code's own chrome —
- * "Hook PreToolUse:Bash requires confirmation", a settings footer, and its own yes/no prompt —
- * and anything longer turns the dialog into a wall. It deliberately does not ask a question,
- * because Claude Code asks one directly underneath.
- */
+/** The one line every spare10 message opens with, so the wording never drifts. */
 export function quotaFacts(state: State, config: RunConfig): string {
   return (
     `into your ${config.reserve}% reserve · ` +
@@ -78,31 +72,12 @@ export function pauseInstruction(state: State, config: RunConfig): string {
   );
 }
 
-const reasonText = quotaSummary;
-
 /**
- * Whether the breaker is currently holding. Used by the places that only warn — the launcher
- * before it starts a session, and the prompt-submit notice — neither of which decides anything.
+ * Whether the breaker is currently holding. Used by the launcher before it starts a session,
+ * which only warns and asks — it decides nothing.
  */
 export function isTripped(state: State, config: RunConfig, now: number): boolean {
-  return decide({ state, config, now, permissionMode: null }).kind !== 'pass';
-}
-
-/**
- * Shown by the launcher before a session starts.
- *
- * There is no equivalent once the session is running: a hook's only user-visible channel is
- * exit code 2, which on UserPromptSubmit erases what the user typed. The status line badge
- * carries the signal from then on.
- *
- * The gate fires on tool calls, and that is what makes its stops safe — it interrupts between
- * calls rather than mid-write. Saying so stops the pause reading like a hang.
- */
-export function noticeText(state: State, config: RunConfig): string {
-  return (
-    `${quotaSummary(state, config)}\nThe agent will pause safely at its first tool call — ` +
-    `between operations, with nothing left half-written.`
-  );
+  return decide({ state, config, now, agent: null }).kind !== 'pass';
 }
 
 /**
@@ -112,25 +87,25 @@ export function noticeText(state: State, config: RunConfig): string {
  * sight of the quota is worse than no guard at all, so staleness, blindness and missing data
  * all open the gate rather than closing it.
  */
-export function decide({ state, config, now, permissionMode }: DecideInput): Decision {
+export function decide({ state, config, now, agent }: DecideInput): Decision {
   if (state.pct === null || state.updatedAt === null) return PASS;
   if (state.blind) return PASS;
   if (!isReadingApplicable(state, config, now)) return PASS;
   if (state.disarmedUntil !== null && now < state.disarmedUntil) return PASS;
   if (state.pct < tripPoint(config)) return PASS;
 
-  if (config.pausePrompt !== null && !state.pausePromptInjected) {
+  // Every agent — the main thread and each subagent — gets the instruction once. Hook
+  // context reaches only the agent whose call it rode in on, so injecting once per session
+  // would leave every other agent running unconstrained.
+  if (config.pausePrompt !== null) {
+    if (agent !== null && state.pausePromptInjectedTo.includes(agent)) return PASS;
     return { kind: 'inject', text: pauseInstruction(state, config) };
   }
 
-  if (permissionMode !== null && NON_INTERACTIVE_MODES.has(permissionMode)) {
-    return {
-      kind: 'deny',
-      reason:
-        `${reasonText(state, config)}. Stop now and wait for the user. ` +
-        `Do not call any further tools.`,
-    };
-  }
-
-  return { kind: 'ask', reason: reasonText(state, config) };
+  return {
+    kind: 'halt',
+    reason:
+      `${quotaSummary(state, config)}. Stop now and wait for the user. ` +
+      `Do not call any further tools.`,
+  };
 }

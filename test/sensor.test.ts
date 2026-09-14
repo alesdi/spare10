@@ -76,18 +76,18 @@ describe('advanceState', () => {
       pct: 97,
       resetsAt: 1000,
       disarmedUntil: 1000,
-      pausePromptInjected: true,
+      pausePromptInjectedTo: ['main'],
     });
     const next = advanceState(prev, reading(2, 19000), 1001);
     expect(next.disarmedUntil).toBeNull();
-    expect(next.pausePromptInjected).toBe(false);
+    expect(next.pausePromptInjectedTo).toEqual([]);
   });
 
   it('preserves the disarm within the same window', () => {
-    const prev = state({ pct: 91, resetsAt: 1000, disarmedUntil: 1000, pausePromptInjected: true });
+    const prev = state({ pct: 91, resetsAt: 1000, disarmedUntil: 1000, pausePromptInjectedTo: ['main'] });
     const next = advanceState(prev, reading(93, 1000), 500);
     expect(next.disarmedUntil).toBe(1000);
-    expect(next.pausePromptInjected).toBe(true);
+    expect(next.pausePromptInjectedTo).toEqual(['main']);
   });
 });
 
@@ -145,6 +145,19 @@ describe('renderBadge', () => {
   it('spells out a non-default reserve once disarmed', () => {
     const badge = renderBadge(state({ pct: 99, disarmedUntil: 100 }), { ...DEFAULT_CONFIG, reserve: 99 }, 50);
     expect(stripAnsi(badge)).toBe('⨯ spare10 (99%)');
+  });
+
+  it('shows a steady pause mark once the pause prompt has gone out', () => {
+    const even = renderBadge(state({ pct: 95, pausePromptInjectedTo: ['main'], tick: 0 }), DEFAULT_CONFIG, 0);
+    const odd = renderBadge(state({ pct: 95, pausePromptInjectedTo: ['main'], tick: 1 }), DEFAULT_CONFIG, 0);
+    expect(stripAnsi(even)).toBe('⏸ spare10');
+    expect(stripAnsi(odd)).toBe('⏸ spare10');
+    expect(even).toContain('\u001b[38;5;208m');
+  });
+
+  it('prefers the disarmed mark over the pause mark', () => {
+    const badge = renderBadge(state({ pct: 95, pausePromptInjectedTo: ['main'], disarmedUntil: 100 }), DEFAULT_CONFIG, 50);
+    expect(stripAnsi(badge)).toBe('⨯ spare10');
   });
 
   it('leaves the blind warning plain, since it is not urgent', () => {

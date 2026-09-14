@@ -103,7 +103,7 @@ export function runDoctor(): number {
   out(
     `  ${MARK.info} on trip       ${
       config.pausePrompt === null
-        ? 'ask for confirmation'
+        ? 'stop the session and ask in the terminal'
         : `inject: ${JSON.stringify(config.pausePrompt)}`
     }`,
   );

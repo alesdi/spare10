@@ -12,10 +12,13 @@ export interface State {
   blind: boolean;
   /** Epoch seconds until which the gate stays quiet, or null. */
   disarmedUntil: number | null;
-  /** Whether --pause-prompt has already been injected this window. */
-  pausePromptInjected: boolean;
-  /** Set when the gate emitted an `ask`; PostToolUse reads it as the approval signal. */
-  awaitingApproval: boolean;
+  /**
+   * Agents that have received --pause-prompt this window, by key (see `agentKey`). Each agent
+   * gets the instruction once, on its first gated call, and passes freely after that.
+   */
+  pausePromptInjectedTo: string[];
+  /** Session id of the Claude Code process the gate stopped, so the launcher can offer to resume it. */
+  halted: string | null;
   /** Increments once per sensor run. Drives the status line pulse. */
   tick: number;
 }
@@ -41,10 +44,19 @@ export const DEFAULT_STATE: State = {
   missingStreak: 0,
   blind: false,
   disarmedUntil: null,
-  pausePromptInjected: false,
-  awaitingApproval: false,
+  pausePromptInjectedTo: [],
+  halted: null,
   tick: 0,
 };
+
+/**
+ * Hooks fire inside subagents too, each carrying its own `agent_id`; the main thread carries
+ * none. Fold both into one key so the pause prompt can be tracked per agent.
+ */
+export const MAIN_AGENT = 'main';
+export function agentKey(agentId: string | null): string {
+  return agentId ?? MAIN_AGENT;
+}
 
 /** The reserve the tool is named after. Shown in the status line only when overridden. */
 export const DEFAULT_RESERVE = 10;

@@ -24,7 +24,9 @@ export function diagnose(state: State, config: RunConfig, now: number): Diagnosi
     return { status: 'disarmed', detail: `consent given; quiet until ${formatClock(state.disarmedUntil)}` };
   }
   if (state.pct >= tripPoint(config)) {
-    return { status: 'tripped', detail: `into the ${config.reserve}% reserve` };
+    const told = state.pausePromptInjectedTo.length;
+    const suffix = told > 0 ? `; pause prompt delivered to ${told} agent${told === 1 ? '' : 's'}` : '';
+    return { status: 'tripped', detail: `into the ${config.reserve}% reserve${suffix}` };
   }
   return {
     status: 'armed',

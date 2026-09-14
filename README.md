@@ -1,38 +1,29 @@
 # spare10
 
-**A circuit breaker for Claude Code.** It keeps a slice of your 5-hour quota in reserve and
-stops the agent before that reserve is spent — so you still have budget left to steer it,
-instead of the session dying mid-edit.
+**A circuit breaker for Claude Code.** Use spare10 when you run low-priority agents on Claude Code and you want to keep a reserve of quota for important stuff. Spare10 watches your session limits and stops the agent when you reach 90%. Then it's up to you to decide whether to continue or not.
+
+To launch a session with spare10, just prefix the `claude` command with `spare10`:
 
 ```
 spare10 claude
 ```
 
-That's the whole integration. spare10 configures the session and gets out of the way.
+## How it works
 
----
-
-## The problem
-
-A long autonomous session burns quota invisibly. When it hits 100%, Claude Code stops
-immediately: a half-finished refactor, uncommitted, and no agent available to finish it or
-back it out. Your context isn't lost — `claude --continue` restores it — but the hours until
-the window resets are, and so is any chance to say "wait, commit that first."
-
-spare10 spends the last slice of your quota on **you**.
-
-## What it does
-
-When usage starts eating the reserve (the last 10% by default) it hands control back:
+When usage starts eating the reserve (the last 10% by default) it stops Claude Code at the
+agent's next tool call — the whole process, subagents and background tasks included — and asks
+you in the terminal whether to carry on:
 
 ```
-spare10 — 9% of the 5-hour window left, which is your 10% reserve.
-Resets at 14:00. Continue anyway?
-  ❯ Yes    No (Esc)
+spare10 — into your 10% reserve · 9% of quota left · resets 14:00
+spare10 stopped the agent between operations — nothing is left half-written.
+Resume anyway? [y/N]
 ```
 
-Approve and it stays quiet for the rest of the window. Press Esc and the turn ends there,
-with your working tree in a state you chose.
+Answer `y` and the session is resumed right where it stopped, with its whole conversation,
+and spare10 stays quiet for the rest of the window. Answer anything else and you are back at
+your shell with the session saved; `claude --resume <id>` picks it up later, when the window
+has reset.
 
 For unattended runs, hand it an instruction instead of a question:
 
@@ -41,8 +32,10 @@ spare10 --pause-prompt "Finish this block, commit, then stop." claude
 ```
 
 That text is injected into the running agent **without blocking it**, so the agent can
-actually carry out the wind-down you asked for. It arrives with the situation attached, since
-an instruction turning up mid-turn otherwise has no context:
+actually carry out the wind-down you asked for. Every agent gets it — the main thread and each
+subagent, on its own next tool call — because hook context only reaches the agent whose call
+it rode in on, and a subagent left untold would keep working. It arrives with the situation
+attached, since an instruction turning up mid-turn otherwise has no context:
 
 ```
 spare10 budget guard. You have reached the safe usage limit for this session
@@ -73,7 +66,7 @@ than installing something that cannot run.
 spare10 [options] <command> [args...]
 
   --reserve <1-99>       Keep this much of the 5-hour window back for yourself (default: 10)
-  --pause-prompt <text>  Inject this instruction instead of asking
+  --pause-prompt <text>  Inject this instruction instead of stopping
   --refresh <seconds>    Quota poll interval (default: 2)
   --no-badge             Never draw the spare10 marker in the status line
   doctor                 Report what spare10 detected and what it would do
@@ -89,16 +82,19 @@ quota in integer percentages, so `--reserve 10.5` is rejected rather than silent
 The status line shows a gray `⧗ spare10` until the first quota reading arrives, a green
 `● spare10` while the reserve is untouched, then an orange
 `⚠ Pausing at next tool call` once it is reached, its icon pulsing once per refresh. Once you
-have consented it drops back to a quiet orange `⨯ spare10`. A non-default reserve is spelled
-out either way, as `● spare10 (20%)` — the name already accounts for 10.
+have consented it drops back to a quiet orange `⨯ spare10`; once a `--pause-prompt` has gone
+out it shows `⏸ spare10`. A non-default reserve is spelled out either way, as
+`● spare10 (20%)` — the name already accounts for 10.
 
 The pulse is driven by spare10's own render cadence rather than the ANSI blink attribute,
 which most terminals ignore.
 
 Consenting at the pre-flight prompt counts for the whole window: the session starts disarmed
-rather than asking the same question again on the first tool call.
+rather than stopping again on the first tool call.
 
-## How it works
+State lives under `~/.spare10`; set `SPARE10_HOME` to put it somewhere else.
+
+## Under the hood
 
 Claude Code exposes quota in exactly one place: the `rate_limits` object handed to your
 **status line** command. It is not available to hooks. Hooks, meanwhile, are the only thing
@@ -106,24 +102,31 @@ that can *stop* anything. So spare10 splits in two and joins them through a stat
 
 ```
 spare10 claude
-  └─ exec claude --settings '{ statusLine: …, hooks: { PreToolUse: …, PostToolUse: … } }'
+  └─ spawn claude --settings '{ statusLine: …, hooks: { PreToolUse: … } }'
 
-  sensor   (status line, every 2s)   reads rate_limits → writes state
-  gate     (PreToolUse, every call)  reads state → passes, asks, injects, or denies
-  post     (PostToolUse)             the tool ran, so the user approved → disarm
+  sensor    (status line, every 2s)   reads rate_limits → writes state
+  gate      (PreToolUse, every call)  reads state → passes, injects, or stops Claude Code
+  launcher  (after Claude Code exits) sees the stop → asks → claude --resume <session>
 ```
 
 **It stops between operations, not mid-write.** The gate fires on tool calls, and that is the
 point rather than a limitation: it interrupts in the gap between one call and the next, where
-nothing is half-written and no command is in flight. A keystroke-level interrupt would land
-wherever the agent happened to be — which is the mess spare10 exists to avoid.
+nothing is half-written and no command is in flight. Claude Code runs write-capable tools one
+at a time, so when the gate fires nothing else that writes can be running either. A
+keystroke-level interrupt would land wherever the agent happened to be — which is the mess
+spare10 exists to avoid.
+
+**It stops the process, not the turn.** A hook on its own can only deny a tool call or ask
+through Claude Code's permission dialog — which non-interactive modes auto-approve, and which
+the model can keep retrying around. So the gate sends Claude Code `SIGTERM` instead. Claude
+Code exits cleanly, the transcript is already on disk, and spare10 asks its own question on
+the terminal it now owns; `y` starts `claude --resume` on the same session. The question is the
+same one in every permission mode, and subagents go down with the process rather than each
+raising a dialog of their own.
 
 The cost is that a turn producing only text is not gated. Before launching, spare10 already
 knows your quota from the previous run, so `spare10 claude` asks for confirmation rather than
-starting a session that would stop on its first move. Once a session is running, the status
-line badge is the signal — a hook's only user-visible channel is exit code 2, which on
-`UserPromptSubmit` erases what you typed, and plain output there becomes model context that
-Claude paraphrases rather than a message you can rely on.
+starting a session that would stop on its first move.
 
 Three consequences worth knowing:
 
@@ -165,10 +168,11 @@ Not in this version, deliberately:
 
 ## Known limitations
 
-- In `bypassPermissions` and `dontAsk` modes an `ask` dialog would be auto-approved, so
-  spare10 falls back to `deny`. The agent may then retry with a different tool and be denied
-  again, burning tokens in a small loop. The deny message tells it to stop; there is no retry
-  counter yet.
+- Stopping the process drops what only lived in it: permissions granted for the session,
+  anything queued or half-typed in the prompt. The resumed session asks again.
+- A session that cannot be resumed — started with `--no-session-persistence`, or inside
+  another Claude Code session, where transcripts are not saved — is not stopped. The gate
+  denies the tool call instead, and the model may retry with another tool before it gives up.
 - Status line chaining reads user-level settings only. A status line configured in project or
   local settings is not detected.
 
@@ -176,7 +180,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 128 tests: unit, plus the hooks and CLI as real subprocesses
+npm test          # 151 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 ```

@@ -1,10 +1,10 @@
 import { beforeAll, describe, expect, it } from 'vitest';
-import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readState } from '../src/state';
-import { DEFAULT_STATE, type RunConfig, type State } from '../src/types';
+import { DEFAULT_STATE, MAIN_AGENT, type RunConfig, type State } from '../src/types';
 
 const BUNDLE = join(__dirname, '..', 'dist', 'spare10.js');
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -26,7 +26,7 @@ function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string
   return dir;
 }
 
-function invoke(command: 'gate' | 'post', dir: string, payload: unknown) {
+function invoke(command: 'gate', dir: string, payload: unknown) {
   const result = spawnSync('node', [BUNDLE, command, '--run', dir], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
@@ -40,13 +40,33 @@ function invoke(command: 'gate' | 'post', dir: string, payload: unknown) {
   };
 }
 
-const hookPayload = (permissionMode = 'default') => ({
-  session_id: 'test',
+const hookPayload = () => ({
+  session_id: 'test-session',
   hook_event_name: 'PreToolUse',
-  permission_mode: permissionMode,
+  permission_mode: 'default',
   tool_name: 'Bash',
   tool_input: { command: 'ls' },
 });
+
+/**
+ * A stand-in for the Claude Code process: writes its own pid where the launcher would, runs
+ * the gate as a child the way Claude Code runs hooks, and reports what the gate said — unless
+ * the gate stopped it first, in which case it says nothing and exits on the signal.
+ */
+const STAND_IN = `
+  const { spawnSync } = require('node:child_process');
+  const { writeFileSync } = require('node:fs');
+  const [bundle, dir, payload] = process.argv.slice(1);
+  writeFileSync(dir + '/claude.pid', String(process.pid));
+  const gate = spawnSync(process.execPath, [bundle, 'gate', '--run', dir], { input: payload, encoding: 'utf8' });
+  process.stdout.write(gate.stdout);
+`;
+
+function invokeUnderStandIn(dir: string, payload: unknown) {
+  return spawnSync(process.execPath, ['-e', STAND_IN, BUNDLE, dir, JSON.stringify(payload)], {
+    encoding: 'utf8',
+  });
+}
 
 describe('gate', () => {
   it('stays silent and exits zero when armed but below threshold', () => {
@@ -54,30 +74,55 @@ describe('gate', () => {
     const result = invoke('gate', dir, hookPayload());
     expect(result.status).toBe(0);
     expect(result.stdout).toBe('');
-    expect(readState(dir).awaitingApproval).toBe(false);
+    expect(readState(dir).halted).toBeNull();
   });
 
-  it('emits an ask decision and records that it is awaiting approval', () => {
+  it('stops the Claude Code process it runs under, recording the session to resume', () => {
+    const dir = makeRun({ pct: 93 });
+    const standIn = invokeUnderStandIn(dir, hookPayload());
+    expect(standIn.signal).toBe('SIGTERM');
+    expect(standIn.stdout).toBe('');
+    expect(readState(dir).halted).toBe('test-session');
+  });
+
+  it('falls back to denying the call when there is no process to stop', () => {
+    // No pid file: the launcher decided the session could not be resumed.
     const dir = makeRun({ pct: 93 });
     const result = invoke('gate', dir, hookPayload());
     expect(result.status).toBe(0);
     expect(result.json?.hookSpecificOutput).toMatchObject({
       hookEventName: 'PreToolUse',
-      permissionDecision: 'ask',
+      permissionDecision: 'deny',
     });
     expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of quota left');
-    expect(readState(dir).awaitingApproval).toBe(true);
+    expect(readState(dir).halted).toBeNull();
   });
 
-  it('denies rather than asking when the mode would auto-approve the dialog', () => {
+  it('never signals a process it is not running under', () => {
     const dir = makeRun({ pct: 93 });
-    const result = invoke('gate', dir, hookPayload('bypassPermissions'));
-    expect(result.json?.hookSpecificOutput.permissionDecision).toBe('deny');
-    // Nothing to approve, so nothing to wait for.
-    expect(readState(dir).awaitingApproval).toBe(false);
+    const bystander = spawn('sleep', ['30'], { stdio: 'ignore' });
+    try {
+      writeFileSync(join(dir, 'claude.pid'), String(bystander.pid));
+      const result = invoke('gate', dir, hookPayload());
+      expect(result.json?.hookSpecificOutput.permissionDecision).toBe('deny');
+      expect(bystander.exitCode).toBeNull();
+      expect(bystander.signalCode).toBeNull();
+      expect(readState(dir).halted).toBeNull();
+    } finally {
+      bystander.kill();
+    }
   });
 
-  it('injects the pause prompt without blocking, then disarms so the agent can comply', () => {
+  it('cannot stop anything without a session id to resume', () => {
+    const dir = makeRun({ pct: 93 });
+    const { session_id: _dropped, ...anonymous } = hookPayload();
+    const standIn = invokeUnderStandIn(dir, anonymous);
+    expect(standIn.signal).toBeNull();
+    expect(JSON.parse(standIn.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(existsSync(join(dir, 'claude.pid'))).toBe(true);
+  });
+
+  it('injects the pause prompt without blocking, then lets that agent through to comply', () => {
     const dir = makeRun({ pct: 93 }, { pausePrompt: 'Finish this block, commit and stop.' });
     const result = invoke('gate', dir, hookPayload());
     const output = result.json?.hookSpecificOutput;
@@ -86,16 +131,32 @@ describe('gate', () => {
     expect(output.permissionDecision).toBeUndefined();
 
     const state = readState(dir);
-    expect(state.pausePromptInjected).toBe(true);
-    expect(state.disarmedUntil).toBe(state.resetsAt);
+    expect(state.pausePromptInjectedTo).toEqual([MAIN_AGENT]);
+    expect(state.disarmedUntil).toBeNull();
+
+    expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
+  });
+
+  it('injects the pause prompt into every subagent, not just the first caller', () => {
+    const dir = makeRun({ pct: 93 }, { pausePrompt: 'Commit and stop.' });
+    const sub = (id: string) => ({ ...hookPayload(), agent_id: id, agent_type: 'Explore' });
+
+    invoke('gate', dir, hookPayload());
+    expect(invoke('gate', dir, sub('a')).json?.hookSpecificOutput.additionalContext).toContain('Commit and stop.');
+    expect(invoke('gate', dir, sub('b')).json?.hookSpecificOutput.additionalContext).toContain('Commit and stop.');
+
+    // Each agent is told once; afterwards its own calls pass while newcomers are still told.
+    expect(invoke('gate', dir, sub('a')).stdout).toBe('');
+    expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
+    expect(readState(dir).pausePromptInjectedTo).toEqual([MAIN_AGENT, 'a', 'b']);
   });
 
   it('survives an unparseable payload without blocking', () => {
     const dir = makeRun({ pct: 93 });
     const result = invoke('gate', dir, 'not json at all');
     expect(result.status).toBe(0);
-    // No permission_mode to read, so it falls back to asking rather than failing.
-    expect(result.json?.hookSpecificOutput.permissionDecision).toBe('ask');
+    // No session to resume, so it falls back to denying rather than failing.
+    expect(result.json?.hookSpecificOutput.permissionDecision).toBe('deny');
   });
 
   it('drains a large payload without erroring', () => {
@@ -112,35 +173,13 @@ describe('gate', () => {
   });
 });
 
-describe('the ask → approve → disarm cycle', () => {
-  it('disarms for the rest of the window once the tool actually runs', () => {
-    const dir = makeRun({ pct: 93 });
-
-    invoke('gate', dir, hookPayload());
-    expect(readState(dir).awaitingApproval).toBe(true);
-
-    // The user approved, so Claude Code ran the tool and PostToolUse fires.
-    invoke('post', dir, { hook_event_name: 'PostToolUse', tool_name: 'Bash' });
-    const state = readState(dir);
-    expect(state.awaitingApproval).toBe(false);
-    expect(state.disarmedUntil).toBe(state.resetsAt);
-
-    // The next tool call sails through instead of nagging.
-    expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
-  });
-
-  it('keeps asking when the user pressed Esc, because PostToolUse never fired', () => {
-    const dir = makeRun({ pct: 93 });
-    invoke('gate', dir, hookPayload());
-    const second = invoke('gate', dir, hookPayload());
-    expect(second.json?.hookSpecificOutput.permissionDecision).toBe('ask');
-    expect(readState(dir).disarmedUntil).toBeNull();
-  });
-
-  it('does not disarm on unrelated tool calls', () => {
-    const dir = makeRun({ pct: 40 });
-    invoke('post', dir, { hook_event_name: 'PostToolUse', tool_name: 'Read' });
-    expect(readState(dir).disarmedUntil).toBeNull();
+describe('after a resume', () => {
+  it('passes for the rest of the window once the launcher has disarmed the run', () => {
+    // What the launcher writes when the user answers yes to "Resume anyway?".
+    const dir = makeRun({ pct: 93, disarmedUntil: nowSeconds() + 3600 });
+    const standIn = invokeUnderStandIn(dir, hookPayload());
+    expect(standIn.signal).toBeNull();
+    expect(standIn.stdout).toBe('');
   });
 });
 

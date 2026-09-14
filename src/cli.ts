@@ -1,5 +1,5 @@
 import { parseArgs, UsageError, USAGE } from './args';
-import { runGate, runPost } from './gate';
+import { runGate } from './gate';
 import { runDoctor } from './doctor-report';
 import { runLaunch } from './launch';
 import { runSensor } from './sensor';
@@ -10,7 +10,7 @@ function flagValue(argv: string[], name: string): string | null {
   return argv[index + 1] ?? null;
 }
 
-function main(argv: string[]): number {
+function main(argv: string[]): number | Promise<number> {
   const [command, ...rest] = argv;
 
   switch (command) {
@@ -26,11 +26,6 @@ function main(argv: string[]): number {
       return runGate(runDir);
     }
 
-    case 'post': {
-      const runDir = flagValue(rest, '--run');
-      if (!runDir) return 0;
-      return runPost(runDir);
-    }
     case 'doctor':
       return runDoctor();
 
@@ -39,9 +34,7 @@ function main(argv: string[]): number {
   }
 }
 
-try {
-  process.exit(main(process.argv.slice(2)));
-} catch (error) {
+function fail(error: unknown): never {
   if (error instanceof UsageError) {
     // Help that was asked for is output; help shown because of a mistake is a diagnostic.
     if (error.message) {
@@ -52,4 +45,10 @@ try {
     process.exit(0);
   }
   throw error;
+}
+
+try {
+  Promise.resolve(main(process.argv.slice(2))).then((code) => process.exit(code), fail);
+} catch (error) {
+  fail(error);
 }

@@ -10,6 +10,8 @@ import {
 
 export const statePath = (runDir: string) => join(runDir, 'state.json');
 export const configPath = (runDir: string) => join(runDir, 'config.json');
+/** Pid of the Claude Code process this run launched. Absent when the session cannot be resumed. */
+export const pidPath = (runDir: string) => join(runDir, 'claude.pid');
 
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -27,6 +29,8 @@ function readJson(path: string): Record<string, unknown> | null {
 const num = (v: unknown, fallback: number | null): number | null =>
   typeof v === 'number' && Number.isFinite(v) ? v : fallback;
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
+const strings = (v: unknown): string[] =>
+  Array.isArray(v) ? v.filter((item): item is string => typeof item === 'string') : [];
 
 /** Never throws. A corrupt or missing state file reads as the default (fail-open) state. */
 export function readState(runDir: string): State {
@@ -39,8 +43,8 @@ export function readState(runDir: string): State {
     missingStreak: num(raw['missingStreak'], 0) ?? 0,
     blind: bool(raw['blind'], false),
     disarmedUntil: num(raw['disarmedUntil'], null),
-    pausePromptInjected: bool(raw['pausePromptInjected'], false),
-    awaitingApproval: bool(raw['awaitingApproval'], false),
+    pausePromptInjectedTo: strings(raw['pausePromptInjectedTo']),
+    halted: typeof raw['halted'] === 'string' && raw['halted'] ? raw['halted'] : null,
     tick: num(raw['tick'], 0) ?? 0,
   };
 }

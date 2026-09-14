@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { decide, formatResetTime, isTripped, noticeText, type Decision } from '../src/decide';
-import { DEFAULT_CONFIG, DEFAULT_STATE, type RunConfig, type State } from '../src/types';
+import { decide, formatResetTime, isTripped, type Decision } from '../src/decide';
+import { DEFAULT_CONFIG, DEFAULT_STATE, MAIN_AGENT, type RunConfig, type State } from '../src/types';
 
 const NOW = 1_000_000;
 
@@ -18,8 +18,8 @@ const config = (overrides: Partial<RunConfig> = {}): RunConfig => ({
   ...overrides,
 });
 
-const run = (state: State, cfg = config(), permissionMode: string | null = 'default'): Decision =>
-  decide({ state, config: cfg, now: NOW, permissionMode });
+const run = (state: State, cfg = config(), agent: string | null = MAIN_AGENT): Decision =>
+  decide({ state, config: cfg, now: NOW, agent });
 
 describe('decide — fail-open branches', () => {
   it.each([
@@ -38,41 +38,41 @@ describe('decide — fail-open branches', () => {
   });
 
   it('trips on the first point of the reserve, not one past it', () => {
-    expect(run(tripped({ pct: 90 })).kind).toBe('ask');
+    expect(run(tripped({ pct: 90 })).kind).toBe('halt');
   });
 
   it('follows a non-default reserve', () => {
     const wide = config({ reserve: 40 });
-    expect(decide({ state: tripped({ pct: 59 }), config: wide, now: NOW, permissionMode: 'default' }).kind).toBe('pass');
-    expect(decide({ state: tripped({ pct: 60 }), config: wide, now: NOW, permissionMode: 'default' }).kind).toBe('ask');
+    expect(run(tripped({ pct: 59 }), wide).kind).toBe('pass');
+    expect(run(tripped({ pct: 60 }), wide).kind).toBe('halt');
   });
 
   it('re-arms once the disarm window has elapsed', () => {
-    expect(run(tripped({ disarmedUntil: NOW })).kind).toBe('ask');
+    expect(run(tripped({ disarmedUntil: NOW })).kind).toBe('halt');
   });
 
   it('still gates on an old reading while its window is open', () => {
     // Usage only rises within a window, so an old figure understates it — never the reverse.
     // Expiring it on a timer used to open the gate during any gap in status line rendering.
-    expect(run(tripped({ updatedAt: NOW - 7200 })).kind).toBe('ask');
+    expect(run(tripped({ updatedAt: NOW - 7200 })).kind).toBe('halt');
   });
 
   it('falls back to the poll interval when there is no window to anchor to', () => {
     const cfg = config();
     const edge = tripped({ resetsAt: null, updatedAt: NOW - cfg.refresh * 3 });
-    expect(decide({ state: edge, config: cfg, now: NOW, permissionMode: 'default' }).kind).toBe('ask');
+    expect(run(edge, cfg).kind).toBe('halt');
   });
 });
 
 describe('decide — tripped behaviour', () => {
-  it('asks the human by default', () => {
+  it('halts the session by default', () => {
     const decision = run(tripped());
-    expect(decision.kind).toBe('ask');
-    if (decision.kind !== 'ask') return;
+    expect(decision.kind).toBe('halt');
+    if (decision.kind !== 'halt') return;
+    // The reason only reaches the model when the process could not be stopped.
     expect(decision.reason).toContain('8% of quota left');
     expect(decision.reason).toContain('into your 10% reserve');
-    // Claude Code asks "Do you want to proceed?" directly below it; do not ask twice.
-    expect(decision.reason).not.toContain('Continue anyway?');
+    expect(decision.reason).toContain('Do not call any further tools');
     expect(decision.reason).toMatch(/resets \d{1,2}:\d{2}/i);
   });
 
@@ -91,7 +91,7 @@ describe('decide — tripped behaviour', () => {
     // Without a preamble the instruction arrives mid-turn with no context at all.
     expect(decision.text).toMatch(/^spare10 budget guard\./);
     expect(decision.text).toContain('safe usage limit for this session');
-    expect(decision.text).toContain('Wrap up your work and stop.');
+    expect(decision.text).toContain('Immediately wrap up your work and stop.');
     // The user's own words come last, and verbatim.
     expect(decision.text).toContain('User instructions: Open a draft PR, then wait.');
     expect(decision.text.trimEnd().endsWith('Open a draft PR, then wait.')).toBe(true);
@@ -103,35 +103,28 @@ describe('decide — tripped behaviour', () => {
     expect(decision.text.match(/spare10/g)?.length).toBe(1);
   });
 
-  it('does not re-inject a pause prompt that already fired', () => {
-    const decision = run(tripped({ pausePromptInjected: true }), config({ pausePrompt: 'Stop.' }));
-    expect(decision.kind).toBe('ask');
+  it('passes an agent that already received the pause prompt', () => {
+    const told = tripped({ pausePromptInjectedTo: [MAIN_AGENT] });
+    expect(run(told, config({ pausePrompt: 'Stop.' })).kind).toBe('pass');
   });
 
-  it.each(['bypassPermissions', 'dontAsk'])(
-    'denies instead of asking in %s mode, where ask would be auto-approved',
-    (mode) => {
-      const decision = run(tripped(), config(), mode);
-      expect(decision.kind).toBe('deny');
-      if (decision.kind !== 'deny') return;
-      expect(decision.reason).toContain('Do not call any further tools');
-    },
-  );
-
-  it.each(['default', 'plan', 'acceptEdits', 'auto', null])(
-    'still asks in %s mode',
-    (mode) => {
-      expect(run(tripped(), config(), mode).kind).toBe('ask');
-    },
-  );
-
-  it('prefers the pause prompt over the deny fallback in non-interactive modes', () => {
-    const decision = run(tripped(), config({ pausePrompt: 'Wind down.' }), 'bypassPermissions');
-    expect(decision.kind).toBe('inject');
+  it('injects into each agent separately, since hook context reaches only the caller', () => {
+    const told = tripped({ pausePromptInjectedTo: [MAIN_AGENT] });
+    expect(run(told, config({ pausePrompt: 'Stop.' }), 'agent-1').kind).toBe('inject');
+    const both = tripped({ pausePromptInjectedTo: [MAIN_AGENT, 'agent-1'] });
+    expect(run(both, config({ pausePrompt: 'Stop.' }), 'agent-1').kind).toBe('pass');
+    expect(run(both, config({ pausePrompt: 'Stop.' }), 'agent-2').kind).toBe('inject');
   });
+
+  it('never treats an unknown caller as already told', () => {
+    // The gate's hot path decides before parsing stdin; it must not wave a subagent through.
+    const told = tripped({ pausePromptInjectedTo: [MAIN_AGENT] });
+    expect(run(told, config({ pausePrompt: 'Stop.' }), null).kind).toBe('inject');
+  });
+
 });
 
-describe('isTripped and noticeText', () => {
+describe('isTripped', () => {
   it('is quiet whenever the gate would pass', () => {
     expect(isTripped(tripped({ pct: 40 }), config(), NOW)).toBe(false);
     expect(isTripped(tripped({ disarmedUntil: NOW + 1 }), config(), NOW)).toBe(false);
@@ -139,12 +132,6 @@ describe('isTripped and noticeText', () => {
 
   it('holds while the reserve is in use', () => {
     expect(isTripped(tripped(), config(), NOW)).toBe(true);
-  });
-
-  it('explains that the pause happens between operations, not mid-write', () => {
-    const notice = noticeText(tripped(), config());
-    expect(notice).toContain('pause safely at its first tool call');
-    expect(notice).toContain('nothing left half-written');
   });
 });
 
