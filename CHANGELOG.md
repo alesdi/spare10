@@ -6,6 +6,8 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-09-14
+
 ### Changed
 
 - **The hard pause now stops Claude Code and asks in the terminal.** When the reserve is
@@ -86,7 +88,8 @@ Initial release.
 - `spare10 doctor` to check the installation and the current run.
 - Install script, npm publishing with provenance, and GitHub Releases.
 
-[Unreleased]: https://github.com/alesdi/spare10/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/alesdi/spare10/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/alesdi/spare10/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alesdi/spare10/compare/v0.1.2...v0.2.0
 [0.1.2]: https://github.com/alesdi/spare10/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/alesdi/spare10/compare/v0.1.0...v0.1.1
