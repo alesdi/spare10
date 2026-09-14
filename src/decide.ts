@@ -73,7 +73,7 @@ export function quotaSummary(state: State, config: RunConfig): string {
 export function pauseInstruction(state: State, config: RunConfig): string {
   return (
     `spare10 budget guard. You have reached the safe usage limit for this session ` +
-    `(${quotaFacts(state, config)}). Wrap up your work and stop.\n\n` +
+    `(${quotaFacts(state, config)}). Immediately wrap up your work and stop. Immediately stop any subagent, unless the user instructs otherwise.\n\n` +
     `User instructions: ${config.pausePrompt ?? ''}`
   );
 }
