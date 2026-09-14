@@ -1,6 +1,6 @@
 {
   "name": "spare10",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Circuit breaker for Claude Code: pause autonomous sessions before the 5-hour quota runs out",
   "keywords": [
     "claude-code",
