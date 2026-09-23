@@ -3,7 +3,18 @@ import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs, UsageError } from '../src/args';
-import { haltVerdict, pinSelf, preflightVerdict, RESUME_PROMPT, resumable, resumeArgs } from '../src/launch';
+import {
+  backgrounded,
+  haltVerdict,
+  pinSelf,
+  preflightVerdict,
+  RESUME_PROMPT,
+  resumable,
+  resumeArgs,
+  stoppedView,
+  subcommandOf,
+} from '../src/launch';
+import type { StoppedSession } from '../src/types';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
@@ -193,6 +204,87 @@ describe('haltVerdict', () => {
 
   it('knows when nobody was there to ask', () => {
     expect(haltVerdict(null)).toBe('unattended');
+  });
+});
+
+describe('subcommandOf', () => {
+  it.each([
+    ['the agent view', ['agents'], 'agents'],
+    ['a subcommand behind flags', ['--reserve-nothing', 'agents'], 'agents'],
+    ['the agent view with its own options', ['agents', '--model', 'opus'], 'agents'],
+    ['an ordinary session', [], null],
+    ['a session with a prompt', ['-p', 'fix the build'], null],
+    ['a session whose prompt is not a subcommand', ['write an agents page'], null],
+  ])('reads %s', (_label, args, expected) => {
+    expect(subcommandOf(args)).toBe(expected);
+  });
+
+  it('does not mistake a flag value for a subcommand', () => {
+    // `--model agents` is a model named agents, not the agent view.
+    expect(subcommandOf(['--model', 'agents'])).toBeNull();
+    expect(subcommandOf(['--add-dir', 'one', 'agents'])).toBeNull();
+  });
+
+  it('stops at the positional separator', () => {
+    expect(subcommandOf(['--', 'agents'])).toBeNull();
+  });
+});
+
+describe('backgrounded', () => {
+  it.each([[['--bg']], [['--background']], [['--resume', 'abc', '--bg']]])(
+    'spots %s',
+    (args) => {
+      expect(backgrounded(args)).toBe(true);
+    },
+  );
+
+  it('is false for an ordinary session', () => {
+    expect(backgrounded(['--model', 'opus'])).toBe(false);
+  });
+});
+
+describe('stoppedView', () => {
+  const record = (overrides: Partial<StoppedSession> = {}): StoppedSession => ({
+    sessionId: 'f7f9f966-d793-4063-acf3-2e064b89e997',
+    backgroundId: 'f7f9f966',
+    name: 'nightly refactor',
+    cwd: '/home/example/project',
+    at: 1_000_000,
+    ...overrides,
+  });
+
+  it('names one paused session in the singular', () => {
+    const view = stoppedView([record()], '/home/example');
+    expect(view.headline).toBe('Reserve reached. A background session is paused.');
+    expect(view.choices[0].label).toBe('Resume');
+    expect(view.body).toContain('nightly refactor · ~/project');
+  });
+
+  it('counts them when there are several', () => {
+    const view = stoppedView([record(), record({ sessionId: 'b', backgroundId: 'b' })], '/home/example');
+    expect(view.headline).toBe('Reserve reached. 2 background sessions are paused.');
+    expect(view.choices[0].label).toBe('Resume all');
+  });
+
+  it('lists at most five, then counts the rest', () => {
+    // A fleet can be large, and a panel that grows past the terminal is no longer a panel.
+    const many = Array.from({ length: 8 }, (_unused, i) =>
+      record({ sessionId: `s${i}`, backgroundId: `s${i}`, name: `session ${i}` }),
+    );
+    const view = stoppedView(many, '/home/example');
+    expect(view.body.filter((line) => line.startsWith('session '))).toHaveLength(5);
+    expect(view.body).toContain('…and 3 more.');
+  });
+
+  it('falls back to the short id when a session never named itself', () => {
+    const view = stoppedView([record({ name: null })], '/home/example');
+    expect(view.body).toContain('f7f9f966 · ~/project');
+  });
+
+  it('offers exactly two answers, the safe one second', () => {
+    const view = stoppedView([record()], '/home/example');
+    expect(view.choices).toHaveLength(2);
+    expect(view.choices[1].label).toBe('Leave stopped');
   });
 });
 

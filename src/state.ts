@@ -1,4 +1,11 @@
-import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from 'node:fs';
+import {
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  unlinkSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import {
   DEFAULT_STATE,
@@ -8,12 +15,15 @@ import {
   type SessionInfo,
   type State,
   type RunConfig,
+  type StoppedSession,
 } from './types';
 
 export const statePath = (runDir: string) => join(runDir, 'state.json');
 export const configPath = (runDir: string) => join(runDir, 'config.json');
 /** Pid of the Claude Code process this run launched. Absent when the session cannot be resumed. */
 export const pidPath = (runDir: string) => join(runDir, 'claude.pid');
+/** One file per background session the gate stopped, named for the session. */
+export const stoppedDir = (runDir: string) => join(runDir, 'stopped');
 
 export function nowSeconds(): number {
   return Math.floor(Date.now() / 1000);
@@ -68,18 +78,72 @@ export function readState(runDir: string): State {
 }
 
 /** Atomic write (tmp + rename). Never throws — a failed write just means a stale read later. */
-export function writeState(runDir: string, state: State): void {
-  const target = statePath(runDir);
+function writeJson(dir: string, target: string, value: unknown): void {
   const tmp = `${target}.${process.pid}.tmp`;
   try {
-    mkdirSync(runDir, { recursive: true });
-    writeFileSync(tmp, JSON.stringify(state), 'utf8');
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(tmp, JSON.stringify(value), 'utf8');
     renameSync(tmp, target);
   } catch {
     try {
       unlinkSync(tmp);
     } catch {
       /* nothing to clean up */
+    }
+  }
+}
+
+export function writeState(runDir: string, state: State): void {
+  writeJson(runDir, statePath(runDir), state);
+}
+
+/**
+ * Record a background session the gate stopped.
+ *
+ * One file per session rather than a list inside `state.json`: several sessions under the same
+ * run can trip within the same moment, and a read-modify-write on a shared file would drop
+ * records. A dropped pause-prompt entry costs one repeated instruction; a dropped stop record
+ * costs a session that vanished with no way back offered. One writer per file has no race.
+ */
+export function recordStopped(runDir: string, record: StoppedSession): void {
+  const dir = stoppedDir(runDir);
+  writeJson(dir, join(dir, `${record.sessionId}.json`), record);
+}
+
+/** Never throws. Anything unreadable is simply not listed. Oldest stop first. */
+export function readStopped(runDir: string): StoppedSession[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(stoppedDir(runDir));
+  } catch {
+    return [];
+  }
+  const records: StoppedSession[] = [];
+  for (const entry of entries) {
+    if (!entry.endsWith('.json')) continue;
+    const raw = readJson(join(stoppedDir(runDir), entry));
+    if (!raw) continue;
+    const sessionId = str(raw['sessionId']);
+    const backgroundId = str(raw['backgroundId']);
+    if (sessionId === null || backgroundId === null) continue;
+    records.push({
+      sessionId,
+      backgroundId,
+      name: str(raw['name']),
+      cwd: str(raw['cwd']),
+      at: num(raw['at'], 0) ?? 0,
+    });
+  }
+  return records.sort((a, b) => a.at - b.at);
+}
+
+/** Drop records the launcher has dealt with. A file that will not go is left for the next run. */
+export function clearStopped(runDir: string, sessionIds: string[]): void {
+  for (const sessionId of sessionIds) {
+    try {
+      unlinkSync(join(stoppedDir(runDir), `${sessionId}.json`));
+    } catch {
+      /* already gone */
     }
   }
 }

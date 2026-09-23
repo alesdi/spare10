@@ -6,6 +6,30 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Background sessions are guarded.** `spare10 claude agents` now protects the whole fleet: the
+  agent view hands spare10's settings to every session it dispatches, and each one carries its own
+  sensor and gate. A background session runs under Claude Code's daemon rather than under the
+  launcher, so there is no process to signal — the gate stops it with `claude stop` instead of
+  `SIGTERM`, keeping its conversation.
+- **One question for everything stopped in the background.** Nothing is attached to a background
+  session to ask on, so spare10 records what it stopped and asks once the wrapper is back in front
+  of you: a panel listing every paused session, resuming them all into the reserve on a yes.
+- **`spare10 doctor` lists sessions still waiting to be resumed**, with the `claude attach` command
+  for each. It looks across every run, not just the latest — the run that stopped a session is
+  rarely the one you are standing in afterwards — and skips any session that is running again.
+  This is the whole report for `spare10 claude --bg …`, which returns before there is anything to
+  ask about — and now says so when it starts.
+
+### Fixed
+
+- **The pause prompt reaches every session under a run, not just the first.** `--pause-prompt` was
+  tracked per agent, and every session's main thread reports no agent id, so the first one to trip
+  consumed the slot and the rest ran on unwarned. Tracking is now per session *and* agent.
+- **A subcommand is no longer treated as a session.** `claude agents` and friends make no tool
+  calls and cannot be resumed, so they no longer leave a pid for the gate to find.
+
 ## [0.4.0] — 2026-09-23
 
 ### Changed

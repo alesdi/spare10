@@ -14,7 +14,8 @@ import {
   type Caps,
   type PromptView,
 } from '../src/panel';
-import { DEFAULT_CONFIG, DEFAULT_STATE, type SessionInfo, type State } from '../src/types';
+import { stoppedView } from '../src/launch';
+import { DEFAULT_CONFIG, DEFAULT_STATE, type SessionInfo, type State, type StoppedSession } from '../src/types';
 
 const FULL: Caps = { color: true, truecolor: true, unicode: true, columns: 90 };
 const PLAIN: Caps = { color: false, truecolor: false, unicode: false, columns: 70 };
@@ -183,5 +184,43 @@ describe('panelWidth', () => {
   it('never goes below the minimum or past the maximum', () => {
     expect(panelWidth(20)).toBe(MIN_PANEL_WIDTH);
     expect(panelWidth(400)).toBe(78);
+  });
+});
+
+describe('the stopped-background panel', () => {
+  const records: StoppedSession[] = [
+    { sessionId: 's1', backgroundId: 'be4ca65c', name: 'nightly refactor', cwd: '/Users/me/Developer/spare10', at: 1 },
+    { sessionId: 's2', backgroundId: '206672f0', name: 'docs sweep', cwd: '/Users/me/Developer/other', at: 2 },
+  ];
+
+  const stopped = (caps: Caps, selected = 0) => {
+    const lines = renderPanel({
+      view: stoppedView(records, '/Users/me'),
+      state: state(),
+      config: DEFAULT_CONFIG,
+      selected,
+      caps,
+      home: '/Users/me',
+    });
+    const top = lines.findIndex((line) => line.startsWith('╭') || line.startsWith('+'));
+    return lines.slice(top);
+  };
+
+  it('gives each stopped session its own line', () => {
+    const text = stopped(FULL).join('\n');
+    expect(text).toContain('nightly refactor · ~/Developer/spare10');
+    expect(text).toContain('docs sweep · ~/Developer/other');
+  });
+
+  it('keeps its height as the selection moves', () => {
+    expect(stopped(FULL, 0)).toHaveLength(stopped(FULL, 1).length);
+  });
+
+  it('draws every card line to the same width', () => {
+    expect([...new Set(stopped(FULL).map(visibleWidth))]).toHaveLength(1);
+  });
+
+  it('survives a terminal with no colour and no unicode', () => {
+    expect(stopped(PLAIN).join('\n')).toContain('nightly refactor');
   });
 });

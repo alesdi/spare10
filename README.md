@@ -135,6 +135,23 @@ The cost is that a turn producing only text is not gated. Before launching, spar
 knows your quota from the previous run, so `spare10 claude` asks for confirmation rather than
 starting a session that would stop on its first move.
 
+**Background sessions are stopped through the CLI.** `spare10 claude agents` guards the whole
+fleet: the agent view passes spare10's settings to every session it dispatches, so each one
+carries its own sensor and gate. But a background session does not run under the launcher — it
+lives under Claude Code's daemon — so there is no process for the gate to signal. Each kind of
+session offers exactly one handle, and they are different ones:
+
+| | listed with | stopped with | resumed with |
+|---|---|---|---|
+| interactive | a `pid` | `SIGTERM` | `claude --resume <session>` |
+| background | a short `id` | `claude stop <id>` | `claude --bg --resume <session>` |
+
+Nothing is attached to a background session to ask a question on, so spare10 stops it, keeps the
+record, and asks once the wrapper is back in front of you: one panel listing every session it
+stopped, resuming them all into the reserve if you say so. Anything left stopped is listed by
+`spare10 doctor` with the command to reopen it — which is also how `spare10 claude --bg …` ends,
+since that returns before there is anything to ask about.
+
 Three consequences worth knowing:
 
 **Nothing you own is modified.** `claude --settings` accepts a raw JSON string, so a run
@@ -171,7 +188,9 @@ Not in this version, deliberately:
 - **Overshoot correction.** The reserve is indicative, not predictive: readings land at 1%
   granularity and up to one refresh interval late, and parallel subagents can land several
   requests at once. Keep back more than you think you need.
-- **Coordination across sessions.** Quota is account-wide, but each run tracks its own state.
+- **Coordination across runs.** Sessions started under one `spare10` command share its state,
+  including every background session dispatched from it. Separate runs do not: quota is
+  account-wide, but each run tracks it on its own, seeded from the last one.
 
 ## Known limitations
 
@@ -182,12 +201,15 @@ Not in this version, deliberately:
   denies the tool call instead, and the model may retry with another tool before it gives up.
 - Status line chaining reads user-level settings only. A status line configured in project or
   local settings is not detected.
+- Stopping a background session goes through `claude stop`, called from inside the session being
+  stopped. If it does not land, the gate falls back to denying the tool call, as it does
+  everywhere else.
 
 ## Development
 
 ```bash
 npm install
-npm test          # 213 tests: unit, plus the hooks and CLI as real subprocesses
+npm test          # 254 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 npm run demo      # the pause prompt at 91% usage, without burning a session

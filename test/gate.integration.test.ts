@@ -1,13 +1,44 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readState } from '../src/state';
-import { DEFAULT_STATE, MAIN_AGENT, type RunConfig, type State } from '../src/types';
+import { readState, readStopped } from '../src/state';
+import { DEFAULT_STATE, type RunConfig, type State } from '../src/types';
 
 const BUNDLE = join(__dirname, '..', 'dist', 'spare10.js');
 const nowSeconds = () => Math.floor(Date.now() / 1000);
+
+/**
+ * A stand-in for the `claude` CLI, first on PATH.
+ *
+ * The gate reaches background sessions through the CLI, and no test may depend on which sessions
+ * happen to be running on the machine it is running on — nor start or stop any of them.
+ */
+function makeStub(listing: unknown[] = []): string {
+  const dir = mkdtempSync(join(tmpdir(), 'spare10-cli-'));
+  writeFileSync(join(dir, 'listing.json'), JSON.stringify(listing));
+  writeFileSync(
+    join(dir, 'claude'),
+    ['#!/bin/sh', `echo "$@" >> "${dir}/calls.log"`, `[ "$1" = agents ] && cat "${dir}/listing.json"`, 'exit 0', ''].join('\n'),
+    { mode: 0o755 },
+  );
+  return dir;
+}
+
+/** Every `claude` invocation the stub saw, one argument line each. */
+function calls(stub: string): string[] {
+  try {
+    return readFileSync(join(stub, 'calls.log'), 'utf8').split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+const stubbedPath = (stub: string) => ({
+  ...process.env,
+  PATH: `${stub}:${process.env['PATH'] ?? ''}`,
+});
 
 beforeAll(() => {
   execFileSync('node', [join(__dirname, '..', 'scripts', 'build.mjs')], { stdio: 'pipe' });
@@ -26,10 +57,11 @@ function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string
   return dir;
 }
 
-function invoke(command: 'gate', dir: string, payload: unknown) {
+function invoke(command: 'gate', dir: string, payload: unknown, stub: string = makeStub()) {
   const result = spawnSync('node', [BUNDLE, command, '--run', dir], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
+    env: stubbedPath(stub),
   });
   return {
     status: result.status,
@@ -62,9 +94,10 @@ const STAND_IN = `
   process.stdout.write(gate.stdout);
 `;
 
-function invokeUnderStandIn(dir: string, payload: unknown) {
+function invokeUnderStandIn(dir: string, payload: unknown, stub: string = makeStub()) {
   return spawnSync(process.execPath, ['-e', STAND_IN, BUNDLE, dir, JSON.stringify(payload)], {
     encoding: 'utf8',
+    env: stubbedPath(stub),
   });
 }
 
@@ -122,6 +155,46 @@ describe('gate', () => {
     expect(existsSync(join(dir, 'claude.pid'))).toBe(true);
   });
 
+  it('stops a background session through the CLI, having no process of its own to signal', () => {
+    // A background session runs under Claude Code's daemon, so the launcher's pid — when there
+    // is one at all — is never on this hook's parent chain. `claude stop` is the only handle.
+    const dir = makeRun({ pct: 93 });
+    const stub = makeStub([
+      { id: 'be4ca65c', kind: 'background', sessionId: 'test-session', name: 'nightly', cwd: '/tmp/project' },
+    ]);
+
+    const result = invoke('gate', dir, hookPayload(), stub);
+
+    expect(calls(stub)).toContain('stop be4ca65c');
+    // The denial still goes out: the session may not be gone by the time the hook has to answer.
+    expect(result.json?.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(readStopped(dir)).toMatchObject([
+      { sessionId: 'test-session', backgroundId: 'be4ca65c', name: 'nightly', cwd: '/tmp/project' },
+    ]);
+  });
+
+  it('leaves an interactive session it did not launch alone', () => {
+    // Listed without a short id, so `claude stop` could not take it anyway — but the point is
+    // that someone else's terminal is not spare10's to close.
+    const dir = makeRun({ pct: 93 });
+    const stub = makeStub([
+      { pid: 4242, kind: 'interactive', sessionId: 'test-session', name: 'other-terminal', cwd: '/tmp/elsewhere' },
+    ]);
+
+    const result = invoke('gate', dir, hookPayload(), stub);
+
+    expect(calls(stub).some((call) => call.startsWith('stop'))).toBe(false);
+    expect(result.json?.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(readStopped(dir)).toEqual([]);
+  });
+
+  it('asks the CLI nothing when it has a process of its own to signal', () => {
+    const dir = makeRun({ pct: 93 });
+    const stub = makeStub();
+    invokeUnderStandIn(dir, hookPayload(), stub);
+    expect(calls(stub)).toEqual([]);
+  });
+
   it('injects the pause prompt without blocking, then lets that agent through to comply', () => {
     const dir = makeRun({ pct: 93 }, { pausePrompt: 'Finish this block, commit and stop.' });
     const result = invoke('gate', dir, hookPayload());
@@ -131,7 +204,7 @@ describe('gate', () => {
     expect(output.permissionDecision).toBeUndefined();
 
     const state = readState(dir);
-    expect(state.pausePromptInjectedTo).toEqual([MAIN_AGENT]);
+    expect(state.pausePromptInjectedTo).toEqual(['test-session:main']);
     expect(state.disarmedUntil).toBeNull();
 
     expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
@@ -148,7 +221,24 @@ describe('gate', () => {
     // Each agent is told once; afterwards its own calls pass while newcomers are still told.
     expect(invoke('gate', dir, sub('a')).stdout).toBe('');
     expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
-    expect(readState(dir).pausePromptInjectedTo).toEqual([MAIN_AGENT, 'a', 'b']);
+    expect(readState(dir).pausePromptInjectedTo).toEqual([
+      'test-session:main',
+      'test-session:a',
+      'test-session:b',
+    ]);
+  });
+
+  it('injects the pause prompt into every session sharing the run, not just the first', () => {
+    // One run directory serves every background session dispatched under its settings, and each
+    // of their main threads reports no agent id at all.
+    const dir = makeRun({ pct: 93 }, { pausePrompt: 'Commit and stop.' });
+    const session = (id: string) => ({ ...hookPayload(), session_id: id });
+
+    expect(invoke('gate', dir, session('one')).json?.hookSpecificOutput.additionalContext).toContain('Commit and stop.');
+    expect(invoke('gate', dir, session('two')).json?.hookSpecificOutput.additionalContext).toContain('Commit and stop.');
+    expect(invoke('gate', dir, session('one')).stdout).toBe('');
+
+    expect(readState(dir).pausePromptInjectedTo).toEqual(['one:main', 'two:main']);
   });
 
   it('survives an unparseable payload without blocking', () => {

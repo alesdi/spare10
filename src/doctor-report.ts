@@ -1,19 +1,21 @@
 import { execFileSync } from 'node:child_process';
 import { accessSync, constants, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { listAgents, stillStopped } from './background';
 import { diagnose, formatClock, formatDuration } from './doctor';
 import { claudeSettingsPath, runsRoot, selfPath } from './launch';
 import { readChainTarget } from './settings';
-import { nowSeconds, readRunConfig, readState } from './state';
+import { nowSeconds, readRunConfig, readState, readStopped } from './state';
 
 declare const __SPARE10_VERSION__: string;
 const VERSION = typeof __SPARE10_VERSION__ === 'string' ? __SPARE10_VERSION__ : 'dev';
 
 const MARK = { ok: '✓', warn: '⚠', info: '·' } as const;
 
-function latestRun(root: string): string | null {
+/** Every run directory, newest first. */
+function allRuns(root: string): string[] {
   try {
-    const runs = readdirSync(root)
+    return readdirSync(root)
       .map((entry) => join(root, entry))
       .filter((path) => {
         try {
@@ -23,11 +25,12 @@ function latestRun(root: string): string | null {
         }
       })
       .sort((a, b) => statSync(b).mtimeMs - statSync(a).mtimeMs);
-    return runs[0] ?? null;
   } catch {
-    return null;
+    return [];
   }
 }
+
+const latestRun = (root: string): string | null => allRuns(root)[0] ?? null;
 
 function which(command: string): string | null {
   try {
@@ -127,6 +130,20 @@ export function runDoctor(): number {
   if (faulty) problems += 1;
   const mark = faulty ? MARK.warn : verdict.status === 'no-data' ? MARK.info : MARK.ok;
   out(`  ${mark} state         ${verdict.status.toUpperCase()} — ${verdict.detail}`);
+
+  // Background sessions are stopped without anyone being asked: nothing is attached to them to
+  // ask on. When the launcher has already exited — as it has after `--bg` — this report is the
+  // only place the offer to resume them survives, so it looks across every run rather than only
+  // this one: the run that stopped a session is rarely the run you are standing in afterwards.
+  const stopped = stillStopped(allRuns(runsRoot()).flatMap(readStopped), listAgents());
+  if (stopped.length > 0) {
+    out();
+    out(`Stopped in the background, waiting to be resumed  (${stopped.length})`);
+    for (const record of stopped) {
+      out(`  ${MARK.info} ${record.name ?? record.backgroundId}`);
+      out(`               claude attach ${record.backgroundId}`);
+    }
+  }
 
   return problems > 0 ? 1 : 0;
 }

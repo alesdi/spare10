@@ -1,8 +1,9 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { findBackground, listAgents, stopBackground } from './background';
 import { decide } from './decide';
 import { parseHookPayload } from './hook-payload';
-import { nowSeconds, pidPath, readRunConfig, readState, writeState } from './state';
+import { nowSeconds, pidPath, readRunConfig, readState, recordStopped, writeState } from './state';
 import { agentKey, type State } from './types';
 
 /**
@@ -62,9 +63,17 @@ function block(ms: number): void {
 }
 
 /**
- * Stop Claude Code outright. The launcher sees the SIGTERM exit, reads `halted` from state,
- * and asks the user in the terminal whether to resume the session — spare10's own prompt,
- * in every permission mode, with subagents and background tasks gone along with the process.
+ * Stop the session this hook is running in, by whichever handle it has.
+ *
+ * A session the launcher started is a child process: signal it, and the launcher sees the
+ * SIGTERM exit, reads `halted` from state and asks the user in the terminal whether to resume
+ * — spare10's own prompt, in every permission mode, with subagents and background tasks gone
+ * along with the process.
+ *
+ * A background session is not ours to signal. It runs under Claude Code's daemon, so no pid we
+ * hold is on its parent chain, and the launcher will never see it exit. `claude stop` is the
+ * handle there; it keeps the conversation, and the record left behind is what the launcher
+ * offers to resume once it is back in front of the user.
  *
  * Denial is the fallback, not the plan: it is the strongest thing a hook can do on its own,
  * but the model can keep trying other tools against it.
@@ -82,9 +91,25 @@ function halt(runDir: string, state: State, sessionId: string | null, reason: st
     } catch {
       /* fall through to the denial */
     }
+  } else if (sessionId !== null) {
+    // Not a process we own. Ask the CLI what this session is: only a background session can be
+    // stopped this way, and an interactive one that is not ours must not be touched at all.
+    const entry = findBackground(listAgents(), sessionId);
+    if (entry !== null) {
+      // Record before stopping, for the same reason the signal path writes state first.
+      recordStopped(runDir, {
+        sessionId,
+        backgroundId: entry.backgroundId,
+        name: entry.name,
+        cwd: entry.cwd,
+        at: nowSeconds(),
+      });
+      stopBackground(entry.backgroundId);
+      block(KILL_GRACE_MS);
+    }
   }
 
-  // Still here: no process to stop, or one that did not go. Claude Code is waiting on this
+  // Still here: no session to stop, or one that did not go. Claude Code is waiting on this
   // hook either way, and a denial keeps the tool call from running.
 
   emit({
@@ -108,7 +133,7 @@ export function runGate(runDir: string): number {
   }
 
   const { sessionId, agentId } = parseHookPayload(drainStdin());
-  const agent = agentKey(agentId);
+  const agent = agentKey(sessionId, agentId);
   const decision = decide({ state, config, now, agent });
 
   switch (decision.kind) {

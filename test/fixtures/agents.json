@@ -1,0 +1,29 @@
+[
+  {
+    "id": "be4ca65c",
+    "cwd": "/Users/example/project",
+    "kind": "background",
+    "startedAt": 1789401776280,
+    "sessionId": "be4ca65c-d8ea-4fce-a195-7fe4c2fd7d0d",
+    "name": "Multiple agents for parallelization",
+    "state": "blocked"
+  },
+  {
+    "pid": 18918,
+    "cwd": "/Users/example/other",
+    "kind": "interactive",
+    "startedAt": 1790159141156,
+    "sessionId": "f7f9f966-d793-4063-acf3-2e064b89e997",
+    "name": "other-9f",
+    "status": "idle"
+  },
+  {
+    "id": "206672f0",
+    "cwd": "/Users/example/project",
+    "kind": "background",
+    "startedAt": 1790002127285,
+    "sessionId": "206672f0-1f3c-4a52-8b21-9c0f4a5d6e70",
+    "name": "datacenter research",
+    "state": "running"
+  }
+]

@@ -12,18 +12,21 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UsageError, type ParsedArgs } from './args';
+import { listAgents, resumeBackground, stillStopped } from './background';
 import { isTripped } from './decide';
-import type { PromptView } from './panel';
+import { tildePath, type PromptView } from './panel';
 import { buildSettings, readChainTarget } from './settings';
 import { ask } from './terminal';
-import type { RunConfig, SessionInfo, State } from './types';
+import type { RunConfig, SessionInfo, State, StoppedSession } from './types';
 import {
+  clearStopped,
   configPath,
   disarmUntil,
   nowSeconds,
   pickSeed,
   pidPath,
   readState,
+  readStopped,
   writeState,
 } from './state';
 
@@ -135,6 +138,98 @@ function haltView(state: State): PromptView {
   };
 }
 
+/** How many stopped sessions the panel lists before it starts counting the rest. */
+const MAX_LISTED = 5;
+
+const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} ${many}`);
+
+/**
+ * The question asked once the wrapper is back in front of the user, for the background sessions
+ * the gate stopped while it was away.
+ *
+ * There is no terminal attached to a background session, so this is the first moment spare10 can
+ * ask about them at all — and it asks about all of them at once, because they all ran on the
+ * same quota and the answer is the same for each.
+ */
+export function stoppedView(records: StoppedSession[], home = homedir()): PromptView {
+  const listed = records.slice(0, MAX_LISTED);
+  const body = [
+    `spare10 stopped ${plural(records.length, 'a background session', 'background sessions')} ` +
+      `at the reserve, between tool calls. Their conversations are kept.`,
+    ...listed.map(
+      (record) =>
+        `${record.name ?? record.backgroundId} · ${tildePath(record.cwd ?? '', home)}`.trim(),
+    ),
+  ];
+  if (records.length > listed.length) {
+    body.push(`…and ${records.length - listed.length} more.`);
+  }
+
+  return {
+    session: launcherSession(),
+    headline: `Reserve reached. ${plural(records.length, 'A background session is', 'background sessions are')} paused.`,
+    body,
+    choices: [
+      {
+        label: records.length === 1 ? 'Resume' : 'Resume all',
+        hint: 'Back to the background, on your reserve. spare10 stays quiet until the limit resets.',
+      },
+      {
+        label: 'Leave stopped',
+        hint: 'Back to the shell. Each one can still be opened with: claude attach <id>',
+      },
+    ],
+  };
+}
+
+/**
+ * Deal with whatever the gate stopped in the background while the wrapper was busy.
+ *
+ * Records that are not resumed are deliberately left on disk. `spare10 doctor` reads them, and
+ * that is the only report there is when no wrapper was left to ask — as after `--bg`, which
+ * returns as soon as the session is dispatched.
+ */
+async function settleStopped(runDir: string, config: RunConfig): Promise<void> {
+  const all = readStopped(runDir);
+  if (all.length === 0) return;
+
+  // Anything running again was picked up by hand while we were away; its record has served its
+  // purpose, and offering to resume it would start a copy of a session that never stopped.
+  const records = stillStopped(all, listAgents());
+  clearStopped(
+    runDir,
+    all.filter((record) => !records.includes(record)).map((record) => record.sessionId),
+  );
+  if (records.length === 0) return;
+
+  const state = readState(runDir);
+  if (haltVerdict(await ask({ view: stoppedView(records), state, config })) !== 'resume') {
+    process.stderr.write(`Left stopped. To pick ${records.length === 1 ? 'it' : 'them'} up later:\n`);
+    for (const record of records) process.stderr.write(`  claude attach ${record.backgroundId}\n`);
+    return;
+  }
+
+  // Consent covers the window, exactly as it does for a session stopped in the foreground —
+  // and it has to, or every resumed session would trip again on its first tool call.
+  writeState(runDir, { ...state, disarmedUntil: disarmUntil(state, nowSeconds()) });
+
+  const resumed: string[] = [];
+  for (const record of records) {
+    if (resumeBackground(record.sessionId, record.cwd)) resumed.push(record.sessionId);
+    else {
+      process.stderr.write(
+        `spare10: could not resume ${record.backgroundId}. Try: claude attach ${record.backgroundId}\n`,
+      );
+    }
+  }
+  clearStopped(runDir, resumed);
+  if (resumed.length > 0) {
+    process.stderr.write(
+      `Resumed ${plural(resumed.length, 'one session', 'sessions')} into the reserve for this window.\n`,
+    );
+  }
+}
+
 /**
  * Warn before starting a session that is already into the reserve.
  *
@@ -202,6 +297,47 @@ const OPTIONAL_VALUE_FLAGS = new Set(['-d', '--debug', '--prompt-suggestions', '
 const DROP_OPTIONAL_VALUE = new Set(['-r', '--resume', '-w', '--worktree', '--from-pr', '--teleport', '--cloud']);
 const DROP_VALUE = new Set(['--session-id']);
 const DROP_BARE = new Set(['-c', '--continue', '--tmux', '--bg', '--background']);
+
+/**
+ * Claude Code's own subcommands. `claude agents` and the rest are tools, not sessions: they make
+ * no tool calls of their own, there is no process for the gate to stop and nothing to resume.
+ * What `claude agents` does do is dispatch background sessions, and those inherit the settings
+ * spare10 hands it — so they are guarded, and the gate reaches them through the CLI instead.
+ */
+const SUBCOMMANDS = new Set([
+  'agents', 'attach', 'auth', 'auto-mode', 'doctor', 'gateway', 'import', 'install', 'logs',
+  'mcp', 'plugin', 'plugins', 'project', 'respawn', 'rm', 'setup-token', 'stop', 'kill',
+  'ultrareview', 'update', 'upgrade',
+]);
+
+/**
+ * The subcommand being run, or null when this is an ordinary session.
+ *
+ * Flag values are stepped over the same way `resumeArgs` steps over them, so `--model agents`
+ * is a model named agents and not the agent view.
+ */
+export function subcommandOf(args: string[]): string | null {
+  for (let i = 0; i < args.length; i += 1) {
+    const token = args[i] as string;
+    if (token === '--') return null;
+    if (!token.startsWith('-')) return SUBCOMMANDS.has(token) ? token : null;
+
+    if (token.includes('=')) continue;
+    const valueAt = (at: number) => args[at] !== undefined && !(args[at] as string).startsWith('-');
+    if (VALUE_FLAGS.has(token) || DROP_VALUE.has(token)) i += 1;
+    else if (OPTIONAL_VALUE_FLAGS.has(token) || DROP_OPTIONAL_VALUE.has(token)) {
+      if (valueAt(i + 1)) i += 1;
+    } else if (VARIADIC_FLAGS.has(token)) {
+      while (valueAt(i + 1)) i += 1;
+    }
+  }
+  return null;
+}
+
+/** `--bg` dispatches the session and returns, so the launcher is gone before it does anything. */
+export function backgrounded(args: string[]): boolean {
+  return args.includes('--bg') || args.includes('--background');
+}
 
 export const RESUME_PROMPT =
   'spare10 budget guard: the user stopped this session as it entered the reserve and has now ' +
@@ -347,8 +483,19 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
     }),
   );
 
-  const canResume = resumable(rest);
-  if (!canResume) {
+  // Two ways the thing we start is not the session: `claude agents` dispatches sessions rather
+  // than being one, and `--bg` hands its session to the daemon and returns. Neither leaves a
+  // process here to signal or a session to resume in this terminal, so neither gets a pid file
+  // — the gate reaches the sessions they start, which inherit these settings, through the CLI.
+  const ownsSession = subcommandOf(rest) === null && !backgrounded(rest);
+  const canResume = ownsSession && resumable(rest);
+  if (backgrounded(rest)) {
+    process.stderr.write(
+      'spare10: --bg returns as soon as the session is dispatched, so spare10 will not be here ' +
+        'to ask about resuming it. It still stops the session at the reserve; ' +
+        '"spare10 doctor" lists what it stopped.\n',
+    );
+  } else if (ownsSession && !canResume) {
     process.stderr.write(
       'spare10: this session will not be saved, so it cannot be stopped and resumed; ' +
         'on trip the gate will deny tool calls instead.\n',
@@ -360,6 +507,27 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
   const ignore = () => {};
   process.on('SIGINT', ignore);
   process.on('SIGTERM', ignore);
+
+  const code = await runForeground({ executable, rest, settings, runDir, runConfig, canResume });
+
+  // The terminal is ours again, which is the only moment anything stopped in the background can
+  // be asked about — including sessions stopped long before this one exited.
+  await settleStopped(runDir, runConfig);
+  return code;
+}
+
+interface ForegroundRun {
+  executable: string;
+  rest: string[];
+  settings: string;
+  runDir: string;
+  runConfig: RunConfig;
+  canResume: boolean;
+}
+
+/** Run Claude Code, and keep running it for as long as the user resumes what the gate stopped. */
+async function runForeground(run: ForegroundRun): Promise<number> {
+  const { executable, rest, settings, runDir, runConfig, canResume } = run;
 
   let args = rest;
   for (;;) {

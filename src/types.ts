@@ -23,6 +23,25 @@ export const EMPTY_SESSION: SessionInfo = {
   fastMode: false,
 };
 
+/**
+ * A background session the gate stopped, kept as its own file under the run directory.
+ *
+ * Background sessions do not run under the launcher — they live under Claude Code's daemon — so
+ * there is no process to signal and no exit for the launcher to notice. The gate leaves a record
+ * instead, and the launcher reads them all when it is next in front of the user.
+ */
+export interface StoppedSession {
+  /** The session's own id, what `claude --bg --resume` takes. */
+  sessionId: string;
+  /** The short id `claude agents` lists, what `claude stop` and `claude attach` take. */
+  backgroundId: string;
+  /** How the session named itself, for the prompt. */
+  name: string | null;
+  cwd: string | null;
+  /** Epoch seconds when it was stopped. */
+  at: number;
+}
+
 /** Persisted quota state for one spare10 run. All fields tolerate being absent. */
 export interface State {
   /** Last observed five_hour.used_percentage (0-100), or null if never seen. */
@@ -80,10 +99,16 @@ export const DEFAULT_STATE: State = {
 /**
  * Hooks fire inside subagents too, each carrying its own `agent_id`; the main thread carries
  * none. Fold both into one key so the pause prompt can be tracked per agent.
+ *
+ * The session id is part of the key because one run directory can now serve many sessions: every
+ * background session dispatched under the same `--settings` shares this state, and each of their
+ * main threads reports no `agent_id` at all. Keyed on the agent alone, the first session to trip
+ * would consume the slot and every other one would pass untouched.
  */
 export const MAIN_AGENT = 'main';
-export function agentKey(agentId: string | null): string {
-  return agentId ?? MAIN_AGENT;
+export const UNKNOWN_SESSION = 'unknown';
+export function agentKey(sessionId: string | null, agentId: string | null): string {
+  return `${sessionId ?? UNKNOWN_SESSION}:${agentId ?? MAIN_AGENT}`;
 }
 
 /** The reserve the tool is named after. Shown in the status line only when overridden. */
