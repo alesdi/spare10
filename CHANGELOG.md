@@ -6,6 +6,8 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-09-23
+
 ### Changed
 
 - **Both of spare10's questions are now a panel you answer with the arrow keys.** The
@@ -111,7 +113,8 @@ Initial release.
 - `spare10 doctor` to check the installation and the current run.
 - Install script, npm publishing with provenance, and GitHub Releases.
 
-[Unreleased]: https://github.com/alesdi/spare10/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/alesdi/spare10/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/alesdi/spare10/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/alesdi/spare10/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/alesdi/spare10/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/alesdi/spare10/compare/v0.1.2...v0.2.0
