@@ -30,9 +30,35 @@ describe('parseStatuslinePayload', () => {
   it.each([['not json', 'garbage'], ['null', 'null'], ['empty', '']])(
     'survives %s input',
     (_label, raw) => {
-      expect(parseStatuslinePayload(raw)).toEqual({ sessionId: null, fiveHour: null });
+      expect(parseStatuslinePayload(raw)).toEqual({ sessionId: null, fiveHour: null, session: null });
     },
   );
+
+  it('reads the session header out of a real payload', () => {
+    const parsed = parseStatuslinePayload(fixture('statusline.with-rate-limits'));
+    expect(parsed.session).toEqual({
+      version: '2.1.267',
+      model: 'Opus 5 (1M context)',
+      effort: 'high',
+      cwd: '/Users/example/project',
+      fastMode: false,
+    });
+  });
+
+  it('reads the header even from the first payload, which has no rate_limits', () => {
+    expect(parseStatuslinePayload(fixture('statusline.no-rate-limits')).session?.model).toBe(
+      'Opus 5 (1M context)',
+    );
+  });
+
+  it('falls back to cwd when the workspace block is missing', () => {
+    const raw = JSON.stringify({ cwd: '/tmp/x', version: '9.9.9' });
+    expect(parseStatuslinePayload(raw).session).toMatchObject({ cwd: '/tmp/x', version: '9.9.9' });
+  });
+
+  it('has no session at all when the payload describes none', () => {
+    expect(parseStatuslinePayload(JSON.stringify({ session_id: 'x' })).session).toBeNull();
+  });
 
   it('clamps out-of-range percentages', () => {
     const raw = JSON.stringify({ rate_limits: { five_hour: { used_percentage: 140 } } });
@@ -88,6 +114,32 @@ describe('advanceState', () => {
     const next = advanceState(prev, reading(93, 1000), 500);
     expect(next.disarmedUntil).toBe(1000);
     expect(next.pausePromptInjectedTo).toEqual(['main']);
+  });
+});
+
+describe('advanceState session header', () => {
+  const header = { version: '2.1.278', model: 'Opus 5', effort: 'high', cwd: '/x', fastMode: false };
+
+  it('records what the session says about itself', () => {
+    const next = advanceState(state(), { sessionId: 's', fiveHour: null, session: header }, 1000);
+    expect(next.session).toEqual(header);
+  });
+
+  it('keeps the last header when a payload arrives without one', () => {
+    const prev = state({ session: header });
+    const next = advanceState(prev, { sessionId: 's', fiveHour: null, session: null }, 1000);
+    expect(next.session).toEqual(header);
+  });
+
+  it('keeps it across a window rollover, which only re-arms the breaker', () => {
+    const prev = state({ session: header, resetsAt: 100, pct: 99 });
+    const next = advanceState(
+      prev,
+      { sessionId: 's', fiveHour: { usedPercentage: 1, resetsAt: 200 }, session: null },
+      1000,
+    );
+    expect(next.session).toEqual(header);
+    expect(next.disarmedUntil).toBeNull();
   });
 });
 

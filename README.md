@@ -15,15 +15,40 @@ agent's next tool call — the whole process, subagents and background tasks inc
 you in the terminal whether to carry on:
 
 ```
-spare10 — into your 10% reserve · 9% of quota left · resets 14:00
-spare10 stopped the agent between operations — nothing is left half-written.
-Resume anyway? [y/N]
+ ▐▛███▛█   Claude Code v2.1.278
+▝▜██████▀  Opus 5 (1M context) with high effort
+  ▝▝ ▝▝    ~/Developer/spare10
+
+╭─ spare10 ──────────────────────────────────────────────── 10% reserve ─╮
+│  Reserve reached. The session is paused.                               │
+│  ███████████████████████████▒▒▒  91% used · 9% left · resets 14:00     │
+│                                                                        │
+│  spare10 stopped the agent between tool calls, so nothing is           │
+│  half-written and the whole conversation is saved.                     │
+│                                                                        │
+│   Resume   [ Stop here ]                                               │
+│  Back to the shell. You can still resume later with: claude --resume   │
+│  a1b2c3d4                                                              │
+│                                                                        │
+│  ←/→ choose · enter confirm · esc cancel                               │
+╰────────────────────────────────────────────────────────────────────────╯
 ```
 
-Answer `y` and the session is resumed right where it stopped, with its whole conversation,
-and spare10 stays quiet for the rest of the window. Answer anything else and you are back at
-your shell with the session saved; `claude --resume <id>` picks it up later, when the window
-has reset.
+The header above the card is the paused session's own — version, model, effort level and
+directory as that session reported them in the status line payload it was sending spare10 all
+along, not the installed version or the default model. It stands outside the frame because it
+describes the session, not the question.
+
+`←`/`→` move between the options and Enter confirms; `y` and `n` still answer outright, and
+Escape leaves the session alone. The selection starts on *Stop here*, so a stray Enter never
+spends the reserve.
+
+Choose **Resume** and the session picks up right where it stopped, with its whole conversation,
+and spare10 stays quiet until the limit resets. Choose **Stop here** and you are back at your
+shell with the session saved; `claude --resume <id>` picks it up later, when the window has
+reset. Terminals that cannot draw the panel — a pipe, `TERM=dumb`, `NO_COLOR`, a narrow
+window — get the plain one-line question instead, and a run with nobody attached carries on
+rather than waiting for an answer that cannot come.
 
 For unattended runs, hand it an instruction instead of a question:
 
@@ -180,10 +205,17 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 151 tests: unit, plus the hooks and CLI as real subprocesses
+npm test          # 213 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
+npm run demo      # the pause prompt at 91% usage, without burning a session
 ```
+
+`npm run demo` draws the real panel from `src/`, so it cannot drift from what spare10 shows.
+It is interactive by default; `-- --static` prints every state at once (both selections, the
+no-colour fallback and the plain line prompt), `-- --preflight` shows the question asked
+before launch rather than the one after a stop, and `-- --width 64` forces a narrower
+terminal.
 
 Test fixtures are real payloads captured from a live Claude Code session, sanitized. When
 Anthropic changes the status line schema, the tolerant parser keeps spare10 failing open and

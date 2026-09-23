@@ -1,3 +1,28 @@
+/**
+ * Who the paused session was, as it described itself in its status line payload.
+ *
+ * spare10 asks its question after Claude Code is gone from the screen, so the prompt reprints
+ * the session's own header. Every field is optional: the payload is undocumented, and a header
+ * line missing is better than a header line invented.
+ */
+export interface SessionInfo {
+  version: string | null;
+  /** `model.display_name`, e.g. "Opus 5 (1M context)". */
+  model: string | null;
+  /** `effort.level`, e.g. "high". */
+  effort: string | null;
+  cwd: string | null;
+  fastMode: boolean;
+}
+
+export const EMPTY_SESSION: SessionInfo = {
+  version: null,
+  model: null,
+  effort: null,
+  cwd: null,
+  fastMode: false,
+};
+
 /** Persisted quota state for one spare10 run. All fields tolerate being absent. */
 export interface State {
   /** Last observed five_hour.used_percentage (0-100), or null if never seen. */
@@ -21,6 +46,8 @@ export interface State {
   halted: string | null;
   /** Increments once per sensor run. Drives the status line pulse. */
   tick: number;
+  /** The running session's own header fields, for the prompt that outlives it. */
+  session: SessionInfo | null;
 }
 
 /** Per-run configuration, written by the launcher and read by sensor/gate/post. */
@@ -47,6 +74,7 @@ export const DEFAULT_STATE: State = {
   pausePromptInjectedTo: [],
   halted: null,
   tick: 0,
+  session: null,
 };
 
 /**

@@ -6,6 +6,18 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- **Both of spare10's questions are now a panel you answer with the arrow keys.** The
+  `Start anyway? [y/N]` and `Resume anyway? [y/N]` lines are replaced by a framed prompt that
+  reprints the paused session's own Claude Code header — version, model, effort and directory,
+  taken from the status line payload that session sent — over a usage bar and the two options
+  with what each one costs. `←`/`→` (or `↑`/`↓`, Tab, `h`/`j`/`k`/`l`) move, Enter confirms,
+  `y`/`n` still answer outright, and Escape or Ctrl-C declines. The selection starts on the
+  safe option, as `[y/N]` always implied. Terminals that cannot take it — no tty, `TERM=dumb`,
+  `NO_COLOR`, a non-UTF-8 locale or a window under 48 columns — get the plain line prompt, and
+  an unattended run still proceeds without anyone to answer.
+
 ## [0.3.1] — 2026-09-14
 
 ### Fixed

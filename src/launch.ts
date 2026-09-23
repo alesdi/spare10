@@ -1,10 +1,7 @@
 import { spawn } from 'node:child_process';
 import {
-  closeSync,
   copyFileSync,
   mkdirSync,
-  openSync,
-  readSync,
   readdirSync,
   rmSync,
   statSync,
@@ -15,9 +12,11 @@ import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UsageError, type ParsedArgs } from './args';
-import { isTripped, quotaSummary } from './decide';
+import { isTripped } from './decide';
+import type { PromptView } from './panel';
 import { buildSettings, readChainTarget } from './settings';
-import type { RunConfig } from './types';
+import { ask } from './terminal';
+import type { RunConfig, SessionInfo, State } from './types';
 import {
   configPath,
   disarmUntil,
@@ -76,31 +75,6 @@ function createRunDir(root: string): string {
   return dir;
 }
 
-/** Read one line straight from the terminal. Returns null when there is no terminal to ask. */
-function askTerminal(question: string): string | null {
-  let fd: number;
-  try {
-    fd = openSync('/dev/tty', 'r');
-  } catch {
-    return null;
-  }
-  process.stderr.write(question);
-  const byte = Buffer.alloc(1);
-  let answer = '';
-  try {
-    while (readSync(fd, byte, 0, 1, null) > 0) {
-      const char = byte.toString('utf8');
-      if (char === '\n' || char === '\r') break;
-      answer += char;
-    }
-  } catch {
-    return null;
-  } finally {
-    closeSync(fd);
-  }
-  return answer.trim();
-}
-
 const consented = (answer: string) => /^y(es)?$/i.test(answer.trim());
 
 export type Preflight = 'clear' | 'consented' | 'declined' | 'proceeding';
@@ -118,17 +92,61 @@ export function preflightVerdict(tripped: boolean, answer: string | null): Prefl
 }
 
 /**
+ * There is no session yet at preflight, so the header says only what the launcher actually
+ * knows. A model or version copied from an earlier run would be a guess printed as a fact.
+ */
+function launcherSession(): SessionInfo {
+  return { version: null, model: null, effort: null, cwd: process.cwd(), fastMode: false };
+}
+
+function preflightView(config: RunConfig): PromptView {
+  return {
+    session: launcherSession(),
+    headline: 'This session would start inside the reserve.',
+    body: [
+      `You have less than the ${config.reserve}% reserve left for this session. ` +
+        `If you decide to start anyway, spare10 will stay quiet until the limit resets.`,
+    ],
+    choices: [
+      { label: 'Start anyway', hint: 'Runs now on your reserve.' },
+      { label: 'Do not start', hint: 'Back to the shell.' },
+    ],
+  };
+}
+
+function haltView(state: State): PromptView {
+  return {
+    session: state.session,
+    headline: 'Reserve reached. The session is paused.',
+    body: [
+      'spare10 stopped the agent between tool calls, so nothing is half-written and the ' +
+        'whole conversation is saved.',
+    ],
+    choices: [
+      {
+        label: 'Resume',
+        hint: 'Continue on the reserve. spare10 stays quiet until the limit resets.',
+      },
+      {
+        label: 'Stop here',
+        hint: `Back to the shell. You can still resume later with: claude --resume ${state.halted ?? ''}`,
+      },
+    ],
+  };
+}
+
+/**
  * Warn before starting a session that is already into the reserve.
  *
  * Seeding means spare10 usually knows the quota before Claude Code is even launched, so the
  * cheapest stop is the one that happens before anything starts.
  */
-function preflight(runDir: string, config: RunConfig): Preflight {
+async function preflight(runDir: string, config: RunConfig): Promise<Preflight> {
   const state = readState(runDir);
   if (!isTripped(state, config, nowSeconds())) return 'clear';
 
-  process.stderr.write(`\n${quotaSummary(state, config)}\n`);
-  return preflightVerdict(true, askTerminal('Start anyway? [y/N] '));
+  const answer = await ask({ view: preflightView(config), state, config });
+  return preflightVerdict(true, answer);
 }
 
 export function selfPath(): string {
@@ -302,7 +320,7 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
   const runDir = createRunDir(root);
 
   seedFromPreviousRuns(root, runDir);
-  const verdict = preflight(runDir, { ...config, chain: null });
+  const verdict = await preflight(runDir, { ...config, chain: null });
   if (verdict === 'declined') {
     process.stderr.write('Not started.\n');
     return 0;
@@ -354,12 +372,8 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
     const state = readState(runDir);
     if (!terminated(exit) || state.halted === null) return exitCode(exit);
 
-    // The gate stopped it. Same question as the preflight, on the same terminal.
-    process.stderr.write(
-      `\n${quotaSummary(state, runConfig)}\n` +
-        `spare10 stopped the agent between operations — nothing is left half-written.\n`,
-    );
-    const halt = haltVerdict(askTerminal('Resume anyway? [y/N] '));
+    // The gate stopped it. Same question as the preflight, in the same panel.
+    const halt = haltVerdict(await ask({ view: haltView(state), state, config: runConfig }));
     if (halt !== 'resume') {
       process.stderr.write(`Not resumed. To pick it up later: claude --resume ${state.halted}\n`);
       // A declined resume is a choice, not a failure; an unattended stop reports as the kill it was.

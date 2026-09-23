@@ -23,6 +23,7 @@
   ],
   "scripts": {
     "build": "node scripts/build.mjs",
+    "demo": "node scripts/demo.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",

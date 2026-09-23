@@ -14,10 +14,13 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
   const window = payload.fiveHour;
 
   const tick = prev.tick + 1;
+  // The header fields are absent from some payloads; keep the last ones we saw rather than
+  // letting the prompt lose the session's identity to one thin poll.
+  const session = payload.session ?? prev.session;
 
   if (!window) {
     const missingStreak = prev.missingStreak + 1;
-    return { ...prev, tick, missingStreak, blind: missingStreak >= BLIND_DEBOUNCE };
+    return { ...prev, tick, session, missingStreak, blind: missingStreak >= BLIND_DEBOUNCE };
   }
 
   // A changed reset timestamp means a new 5-hour window: re-arm everything.
@@ -26,6 +29,7 @@ export function advanceState(prev: State, payload: StatuslinePayload, now: numbe
 
   return {
     tick,
+    session,
     pct: window.usedPercentage,
     resetsAt: window.resetsAt,
     updatedAt: now,

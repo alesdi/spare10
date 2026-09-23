@@ -1,0 +1,187 @@
+import { describe, expect, it } from 'vitest';
+import {
+  MIN_PANEL_WIDTH,
+  factsLine,
+  headerLines,
+  palette,
+  panelWidth,
+  plainPrompt,
+  renderMark,
+  renderPanel,
+  tildePath,
+  usageBar,
+  visibleWidth,
+  type Caps,
+  type PromptView,
+} from '../src/panel';
+import { DEFAULT_CONFIG, DEFAULT_STATE, type SessionInfo, type State } from '../src/types';
+
+const FULL: Caps = { color: true, truecolor: true, unicode: true, columns: 90 };
+const PLAIN: Caps = { color: false, truecolor: false, unicode: false, columns: 70 };
+
+const SESSION: SessionInfo = {
+  version: '2.1.278',
+  model: 'Opus 5 (1M context)',
+  effort: 'high',
+  cwd: '/Users/me/Developer/spare10',
+  fastMode: false,
+};
+
+const state = (over: Partial<State> = {}): State => ({
+  ...DEFAULT_STATE,
+  pct: 91,
+  resetsAt: 1_789_041_600,
+  updatedAt: 1_789_020_000,
+  session: SESSION,
+  ...over,
+});
+
+const view: PromptView = {
+  session: SESSION,
+  headline: 'Reserve reached — the session is paused.',
+  body: ['spare10 stopped the agent between tool calls, so nothing is half-written.'],
+  choices: [
+    { label: 'Resume', hint: 'Picks up exactly where it stopped, for the rest of this window.' },
+    { label: 'Stop here', hint: 'Back to the shell.' },
+  ],
+};
+
+const panel = (caps: Caps, selected = 0, over: Partial<State> = {}) =>
+  renderPanel({ view, state: state(over), config: DEFAULT_CONFIG, selected, caps, home: '/Users/me' });
+
+/** The framed card, without the session header standing above it. */
+const card = (caps: Caps, selected = 0, over: Partial<State> = {}) => {
+  const lines = panel(caps, selected, over);
+  const top = lines.findIndex((line) => line.startsWith('╭') || line.startsWith('+'));
+  return lines.slice(top);
+};
+
+describe('renderPanel', () => {
+  it.each([60, 70, 90, 200])('draws every card line to the same width at %i columns', (columns) => {
+    const widths = new Set(card({ ...FULL, columns }).map(visibleWidth));
+    expect([...widths]).toHaveLength(1);
+  });
+
+  it('stands the session header above the card, unboxed, with a blank line between', () => {
+    const lines = panel(FULL);
+    const top = lines.findIndex((line) => line.startsWith('╭'));
+    expect(top).toBe(4); // three header rows and the blank line
+    expect(lines.slice(0, 3).join('\n')).toContain('Claude Code');
+    expect(lines[3]).toBe('');
+    expect(lines.slice(0, 4).some((line) => line.includes('│'))).toBe(false);
+  });
+
+  it('keeps the same height whichever option is selected, so redrawing does not jump', () => {
+    expect(panel(FULL, 0)).toHaveLength(panel(FULL, 1).length);
+  });
+
+  it('never exceeds the terminal width', () => {
+    for (const columns of [50, 64, 80, 120]) {
+      for (const line of panel({ ...FULL, columns })) {
+        expect(visibleWidth(line)).toBeLessThanOrEqual(columns);
+      }
+    }
+  });
+
+  it('marks the selected option and only shows its hint', () => {
+    const resume = panel(FULL, 0).join('\n');
+    const stop = panel(FULL, 1).join('\n');
+    expect(resume).toContain('Picks up exactly where it stopped');
+    expect(resume).not.toContain('Back to the shell.');
+    expect(stop).toContain('Back to the shell.');
+  });
+
+  it('falls back to ASCII and no colour when the terminal cannot do better', () => {
+    const drawn = panel(PLAIN).join('\n');
+    expect(drawn).not.toMatch(/\u001b\[/);
+    expect(drawn).not.toMatch(/[╭╮╰╯│─█▒▀▄]/);
+  });
+
+  it('shows the paused session header', () => {
+    const drawn = panel(FULL).join('\n');
+    expect(drawn).toContain('Claude Code');
+    expect(drawn).toContain('v2.1.278');
+    expect(drawn).toContain('Opus 5 (1M context) with high effort');
+    expect(drawn).toContain('~/Developer/spare10');
+  });
+
+  it('drops the usage bar rather than inventing a figure when the quota is unknown', () => {
+    const drawn = panel(FULL, 0, { pct: null }).join('\n');
+    expect(drawn).not.toContain('% used');
+    expect(drawn).toContain('Reserve reached');
+  });
+});
+
+describe('headerLines', () => {
+  it('leaves out what the payload did not carry', () => {
+    const p = palette(PLAIN);
+    const lines = headerLines({ ...SESSION, model: null, effort: null, version: null }, '/Users/me', p);
+    expect(lines).toEqual(['Claude Code', '~/Developer/spare10']);
+  });
+
+  it('is one line when nothing is known at all', () => {
+    expect(headerLines(null, '/Users/me', palette(PLAIN))).toEqual(['Claude Code']);
+  });
+
+  it('names fast mode, which changes what a session costs', () => {
+    const lines = headerLines({ ...SESSION, fastMode: true }, '/Users/me', palette(PLAIN));
+    expect(lines[1]).toContain('fast mode');
+  });
+});
+
+describe('renderMark', () => {
+  it('is three rows of equal width, to sit beside the three header lines', () => {
+    const rows = renderMark(FULL);
+    expect(rows).toHaveLength(3);
+    expect(new Set(rows.map(visibleWidth))).toEqual(new Set([9]));
+  });
+
+  it('is left out entirely when the terminal cannot colour it', () => {
+    expect(renderMark(PLAIN)).toEqual([]);
+  });
+});
+
+describe('usageBar', () => {
+  it('fills in proportion to usage', () => {
+    const p = palette(PLAIN);
+    expect(usageBar(50, 10, p, false)).toBe('#####-----');
+    expect(usageBar(0, 10, p, false)).toBe('----------');
+    expect(usageBar(100, 10, p, false)).toBe('##########');
+  });
+});
+
+describe('tildePath', () => {
+  it.each([
+    ['/Users/me/src/x', '/Users/me', '~/src/x'],
+    ['/Users/me', '/Users/me', '~'],
+    ['/opt/thing', '/Users/me', '/opt/thing'],
+    ['/Users/median/x', '/Users/me', '/Users/median/x'],
+  ])('%s under %s reads as %s', (path, home, expected) => {
+    expect(tildePath(path, home)).toBe(expected);
+  });
+});
+
+describe('factsLine', () => {
+  it('says so plainly when there is no reading', () => {
+    expect(factsLine({ ...DEFAULT_STATE })).toContain('quota unknown');
+  });
+
+  it('leads with what is left', () => {
+    expect(factsLine(state())).toMatch(/^91% used · 9% left · resets /);
+  });
+});
+
+describe('plainPrompt', () => {
+  it('still carries the figures for terminals that get no panel', () => {
+    const prompt = plainPrompt(view, state());
+    expect(prompt).toContain('91% used');
+    expect(prompt).toContain('Resume? [y/N]');
+  });
+});
+
+describe('panelWidth', () => {
+  it('never goes below the minimum or past the maximum', () => {
+    expect(panelWidth(20)).toBe(MIN_PANEL_WIDTH);
+    expect(panelWidth(400)).toBe(78);
+  });
+});

@@ -2,8 +2,10 @@ import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync } from '
 import { join } from 'node:path';
 import {
   DEFAULT_STATE,
+  EMPTY_SESSION,
   DEFAULT_CONFIG,
   FALLBACK_DISARM_SECONDS,
+  type SessionInfo,
   type State,
   type RunConfig,
 } from './types';
@@ -31,6 +33,21 @@ const num = (v: unknown, fallback: number | null): number | null =>
 const bool = (v: unknown, fallback: boolean): boolean => (typeof v === 'boolean' ? v : fallback);
 const strings = (v: unknown): string[] =>
   Array.isArray(v) ? v.filter((item): item is string => typeof item === 'string') : [];
+const str = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+
+/** Cosmetic only — anything unreadable just costs the prompt a header line. */
+function readSession(v: unknown): SessionInfo | null {
+  if (typeof v !== 'object' || v === null) return null;
+  const raw = v as Record<string, unknown>;
+  return {
+    ...EMPTY_SESSION,
+    version: str(raw['version']),
+    model: str(raw['model']),
+    effort: str(raw['effort']),
+    cwd: str(raw['cwd']),
+    fastMode: raw['fastMode'] === true,
+  };
+}
 
 /** Never throws. A corrupt or missing state file reads as the default (fail-open) state. */
 export function readState(runDir: string): State {
@@ -46,6 +63,7 @@ export function readState(runDir: string): State {
     pausePromptInjectedTo: strings(raw['pausePromptInjectedTo']),
     halted: typeof raw['halted'] === 'string' && raw['halted'] ? raw['halted'] : null,
     tick: num(raw['tick'], 0) ?? 0,
+    session: readSession(raw['session']),
   };
 }
 
