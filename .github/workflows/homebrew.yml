@@ -1,0 +1,61 @@
+# Point the Homebrew formula at a published npm tarball.
+#
+# Separate from Release so it can be re-run on its own: a tap that failed to bump, or a
+# version released before this existed, needs a way back without publishing anything again.
+name: Homebrew
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version the formula should point at, e.g. 0.4.0'
+        required: true
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: alesdi/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
+      - name: Point the formula at ${{ inputs.version || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${{ inputs.version || github.ref_name }}"
+          version="${version#v}"
+          url="https://registry.npmjs.org/spare10/-/spare10-${version}.tgz"
+
+          # npm warns that a publish "may take a few minutes to become available", and the
+          # formula's checksum has to be of the file the registry actually serves — so wait
+          # for the tarball rather than racing the Release job that is publishing it.
+          for attempt in $(seq 1 30); do
+            if curl -fsSL "$url" -o package.tgz; then break; fi
+            echo "waiting for $url (attempt $attempt)"
+            sleep 10
+          done
+          test -s package.tgz || { echo "npm never served $url" >&2; exit 1; }
+
+          sha="$(sha256sum package.tgz | cut -d ' ' -f 1)"
+          rm package.tgz
+          echo "$version -> $sha"
+
+          sed -i -E \
+            -e "s|^(  url \").*(\")$|\1${url}\2|" \
+            -e "s|^(  sha256 \").*(\")$|\1${sha}\2|" \
+            Formula/spare10.rb
+          ruby -c Formula/spare10.rb
+          grep -E '^  (url|sha256) ' Formula/spare10.rb
+
+          if git diff --quiet; then
+            echo "formula is already at ${version}; nothing to do"
+            exit 0
+          fi
+
+          git -c user.name='github-actions[bot]' \
+              -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+              commit -am "spare10 ${version}"
+          git push
