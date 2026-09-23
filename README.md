@@ -14,25 +14,7 @@ When usage starts eating the reserve (the last 10% by default) it stops Claude C
 agent's next tool call — the whole process, subagents and background tasks included — and asks
 you in the terminal whether to carry on:
 
-```
- ▐▛███▛█   Claude Code v2.1.278
-▝▜██████▀  Opus 5 (1M context) with high effort
-  ▝▝ ▝▝    ~/Developer/spare10
-
-╭─ spare10 ──────────────────────────────────────────────── 10% reserve ─╮
-│  Reserve reached. The session is paused.                               │
-│  ███████████████████████████▒▒▒  91% used · 9% left · resets 14:00     │
-│                                                                        │
-│  spare10 stopped the agent between tool calls, so nothing is           │
-│  half-written and the whole conversation is saved.                     │
-│                                                                        │
-│   Resume   [ Stop here ]                                               │
-│  Back to the shell. You can still resume later with: claude --resume   │
-│  a1b2c3d4                                                              │
-│                                                                        │
-│  ←/→ choose · enter confirm · esc cancel                               │
-╰────────────────────────────────────────────────────────────────────────╯
-```
+<img width="1080" height="525" alt="spare10" src="https://github.com/user-attachments/assets/7e0107b1-a389-44dd-b5cc-638b6837cf88" />
 
 The header above the card is the paused session's own — version, model, effort level and
 directory as that session reported them in the status line payload it was sending spare10 all
