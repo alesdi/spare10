@@ -156,6 +156,23 @@ describe('renderMark', () => {
 });
 
 describe('usageBar', () => {
+  it('draws only a limit into its reserve in the brand colour', () => {
+    const p = palette(FULL);
+    const brand = '\u001b[38;2;217;119;87m';
+    expect(usageBar(50, 10, p, true, true)).toContain(brand);
+    expect(usageBar(50, 10, p, true, false)).not.toContain(brand);
+  });
+
+  it('colours the limit that tripped and leaves the other gray', () => {
+    const brand = '\u001b[38;2;217;119;87m';
+    const lines = card(FULL, 0, { pct: 40, weekly: { pct: 95, resetsAt: 1_789_257_600, updatedAt: 1_789_020_000 } });
+    // eslint-disable-next-line no-control-regex
+    const row = (label: string) => lines.find((line) => line.replace(/\u001b\[[0-9;]*m/g, '').includes(`${label}  `));
+    expect(row('weekly')).toContain(brand);
+    expect(row('session')).toBeDefined();
+    expect(row('session')).not.toContain(brand);
+  });
+
   it('fills in proportion to usage', () => {
     const p = palette(PLAIN);
     expect(usageBar(50, 10, p, false)).toBe('#####-----');

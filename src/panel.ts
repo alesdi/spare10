@@ -5,7 +5,7 @@
  * so the whole look is testable without a terminal. `src/terminal.ts` owns the tty.
  */
 
-import { LIMITS, remaining, type Limit, type RunConfig, type SessionInfo, type State } from './types';
+import { LIMITS, remaining, tripPoint, type Limit, type RunConfig, type SessionInfo, type State } from './types';
 import { formatResetTime } from './decide';
 
 export interface Caps {
@@ -104,12 +104,17 @@ export function headerLines(session: SessionInfo | null, home: string, p: Palett
 
 const BAR = { unicode: { filled: '█', empty: '▒' }, ascii: { filled: '#', empty: '-' } };
 
-/** Usage as a bar, drawn over the whole window so the reserve is the tail of it. */
-export function usageBar(pct: number, width: number, p: Palette, unicode: boolean): string {
+/**
+ * Usage as a bar, drawn over the whole window so the reserve is the tail of it. Only a limit
+ * into its reserve is drawn in the brand colour; the other stays gray, so the eye goes straight
+ * to the one that stopped the session.
+ */
+export function usageBar(pct: number, width: number, p: Palette, unicode: boolean, hot = true): string {
   const glyph = unicode ? BAR.unicode : BAR.ascii;
   const cells = Math.max(4, width);
   const filled = Math.min(cells, Math.max(0, Math.round((pct / 100) * cells)));
-  return `${p.brand(glyph.filled.repeat(filled))}${p.dim(glyph.empty.repeat(cells - filled))}`;
+  const fill = hot ? p.brand : p.dim;
+  return `${fill(glyph.filled.repeat(filled))}${p.dim(glyph.empty.repeat(cells - filled))}`;
 }
 
 /**
@@ -239,7 +244,11 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
     const facts = p.dim(factsLine(state, limit, short));
     const name = p.dim(limit.padEnd(LABEL_WIDTH));
     if (barWidth < MIN_BAR) push(`${name}  ${facts}`);
-    else push(`${name}  ${usageBar(state.limits[limit].pct as number, barWidth, p, caps.unicode)}  ${facts}`);
+    else {
+      const pct = state.limits[limit].pct as number;
+      const bar = usageBar(pct, barWidth, p, caps.unicode, pct >= tripPoint(config, limit));
+      push(`${name}  ${bar}  ${facts}`);
+    }
   }
 
   push();
