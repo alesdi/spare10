@@ -14,7 +14,8 @@ When usage starts eating the reserve of either limit (the last 10% by default) i
 agent's next tool call — the whole process, subagents and background tasks included — and asks
 you in the terminal whether to carry on:
 
-<img width="1080" height="525" alt="spare10" src="https://github.com/user-attachments/assets/7e0107b1-a389-44dd-b5cc-638b6837cf88" />
+<img width="1080" height="600" alt="657171073-7e0107b1-a389-44dd-b5cc-638b6837cf88" src="https://github.com/user-attachments/assets/7d205e8c-33a7-4b17-81b6-333f6baee5fd" />
+
 
 The header above the card is the paused session's own — version, model, effort level and
 directory as that session reported them in the status line payload it was sending spare10 all
