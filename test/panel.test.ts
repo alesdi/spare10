@@ -157,14 +157,29 @@ describe('renderMark', () => {
 });
 
 describe('thresholdMarker', () => {
-  it('points at the first cell of the reserve', () => {
+  it('points at the last cell a bar fills to reach the threshold', () => {
     const p = palette(PLAIN);
-    expect(thresholdMarker(90, 20, p, false, 'up')).toBe(`${' '.repeat(18)}^`);
-    expect(thresholdMarker(50, 10, p, true, 'down')).toBe(`${' '.repeat(5)}▼`);
+    expect(thresholdMarker(90, 20, p, false, 'up')).toBe(`${' '.repeat(17)}^`);
+    expect(thresholdMarker(50, 10, p, true, 'down')).toBe(`${' '.repeat(4)}▼`);
   });
 
-  it('never points past the end of the bar', () => {
-    expect(thresholdMarker(100, 10, palette(PLAIN), false, 'up')).toBe(`${' '.repeat(9)}^`);
+  it('never points before the start of the bar', () => {
+    expect(thresholdMarker(1, 10, palette(PLAIN), false, 'up')).toBe('^');
+  });
+
+  it('points at a filled cell whenever usage is at or past the threshold', () => {
+    const p = palette(PLAIN);
+    for (let width = 6; width <= 60; width += 1) {
+      for (let trip = 1; trip <= 99; trip += 1) {
+        const at = thresholdMarker(trip, width, p, false, 'up').length - 1;
+        // A threshold under half a cell fills nothing at all, so there is no filled cell to point
+        // at: only reserves of 92% and more, on the narrowest bars.
+        if (!usageBar(trip, width, p, false).includes('#')) continue;
+        for (const pct of [trip, Math.min(100, trip + 1), 100]) {
+          expect(usageBar(pct, width, p, false)[at], `width ${width}, trip ${trip}, at ${pct}%`).toBe('#');
+        }
+      }
+    }
   });
 });
 

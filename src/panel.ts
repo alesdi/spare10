@@ -111,8 +111,9 @@ const cellsFor = (pct: number, cells: number) =>
 const ARROW = { unicode: { down: '▼', up: '▲' }, ascii: { down: 'v', up: '^' } };
 
 /**
- * An arrow pointing at the first cell of the reserve, to sit on the row above or below a bar
- * of the same width: a bar filled up to the arrow has just reached it.
+ * An arrow pointing at the last cell a bar has to fill to reach its threshold, to sit on the row
+ * above or below a bar of the same width. It uses the fill's own rounding, so a limit at or past
+ * its threshold always has the cell under the arrow filled.
  */
 export function thresholdMarker(
   trip: number,
@@ -122,7 +123,7 @@ export function thresholdMarker(
   direction: 'down' | 'up',
 ): string {
   const cells = Math.max(4, width);
-  const at = Math.min(cells - 1, cellsFor(trip, cells));
+  const at = Math.max(0, cellsFor(trip, cells) - 1);
   return `${' '.repeat(at)}${p.dim((unicode ? ARROW.unicode : ARROW.ascii)[direction])}`;
 }
 
