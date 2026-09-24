@@ -104,6 +104,28 @@ export function headerLines(session: SessionInfo | null, home: string, p: Palett
 
 const BAR = { unicode: { filled: '█', empty: '▒' }, ascii: { filled: '#', empty: '-' } };
 
+/** How many of a bar's cells a percentage covers, the same rounding for the fill and the marker. */
+const cellsFor = (pct: number, cells: number) =>
+  Math.min(cells, Math.max(0, Math.round((pct / 100) * cells)));
+
+const ARROW = { unicode: { down: '▼', up: '▲' }, ascii: { down: 'v', up: '^' } };
+
+/**
+ * An arrow pointing at the first cell of the reserve, to sit on the row above or below a bar
+ * of the same width: a bar filled up to the arrow has just reached it.
+ */
+export function thresholdMarker(
+  trip: number,
+  width: number,
+  p: Palette,
+  unicode: boolean,
+  direction: 'down' | 'up',
+): string {
+  const cells = Math.max(4, width);
+  const at = Math.min(cells - 1, cellsFor(trip, cells));
+  return `${' '.repeat(at)}${p.dim((unicode ? ARROW.unicode : ARROW.ascii)[direction])}`;
+}
+
 /**
  * Usage as a bar, drawn over the whole window so the reserve is the tail of it. Only a limit
  * into its reserve is drawn in the brand colour; the other stays gray, so the eye goes straight
@@ -112,7 +134,7 @@ const BAR = { unicode: { filled: '█', empty: '▒' }, ascii: { filled: '#', em
 export function usageBar(pct: number, width: number, p: Palette, unicode: boolean, hot = true): string {
   const glyph = unicode ? BAR.unicode : BAR.ascii;
   const cells = Math.max(4, width);
-  const filled = Math.min(cells, Math.max(0, Math.round((pct / 100) * cells)));
+  const filled = cellsFor(pct, cells);
   const fill = hot ? p.brand : p.dim;
   return `${fill(glyph.filled.repeat(filled))}${p.dim(glyph.empty.repeat(cells - filled))}`;
 }
@@ -240,16 +262,26 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
     text - LABEL_WIDTH - 4 - Math.max(0, ...shown.map((limit) => factsLine(state, limit, short).length));
   const short = room(false) < MIN_BAR;
   const barWidth = room(short);
+  const bars = barWidth >= MIN_BAR;
+  // The threshold is marked from outside the column: pointing down at the top bar's, and up at
+  // the bottom bar's, so each arrow sits against the bar whose reserve it marks.
+  const marker = (limit: Limit, direction: 'down' | 'up') =>
+    push(
+      `${' '.repeat(LABEL_WIDTH + 2)}` +
+        thresholdMarker(tripPoint(config, limit), barWidth, p, caps.unicode, direction),
+    );
+  if (bars && shown.length > 0) marker(shown[0] as Limit, 'down');
   for (const limit of shown) {
     const facts = p.dim(factsLine(state, limit, short));
     const name = p.dim(limit.padEnd(LABEL_WIDTH));
-    if (barWidth < MIN_BAR) push(`${name}  ${facts}`);
+    if (!bars) push(`${name}  ${facts}`);
     else {
       const pct = state.limits[limit].pct as number;
       const bar = usageBar(pct, barWidth, p, caps.unicode, pct >= tripPoint(config, limit));
       push(`${name}  ${bar}  ${facts}`);
     }
   }
+  if (bars && shown.length > 0) marker(shown[shown.length - 1] as Limit, 'up');
 
   push();
   for (const paragraph of view.body) for (const line of wrap(paragraph, text)) push(p.dim(line));
