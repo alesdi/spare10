@@ -1,42 +1,65 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { parseStatuslinePayload, type StatuslinePayload } from './payload';
+import { isIntoReserve } from './decide';
+import { parseStatuslinePayload, type QuotaWindow, type StatuslinePayload } from './payload';
 import { readRunConfig, readState, writeState, nowSeconds } from './state';
-import { BLIND_DEBOUNCE, DEFAULT_RESERVE, tripPoint, type RunConfig, type State } from './types';
+import {
+  BLIND_DEBOUNCE,
+  DEFAULT_RESERVE,
+  LIMITS,
+  type LimitState,
+  type RunConfig,
+  type State,
+} from './types';
+
+/**
+ * Fold one limit's reading into what we knew of it.
+ *
+ * A changed reset timestamp means a new window for this limit: its consent and pause-prompt
+ * bookkeeping start over. The other limit's window is none of its business.
+ */
+function advanceLimit(prev: LimitState, window: QuotaWindow | undefined, now: number): LimitState {
+  if (!window) return prev;
+  const rolledOver =
+    window.resetsAt !== null && prev.resetsAt !== null && window.resetsAt !== prev.resetsAt;
+  return {
+    pct: window.usedPercentage,
+    resetsAt: window.resetsAt,
+    updatedAt: now,
+    disarmedUntil: rolledOver ? null : prev.disarmedUntil,
+    pausePromptInjectedTo: rolledOver ? [] : prev.pausePromptInjectedTo,
+  };
+}
 
 /**
  * Fold one statusline payload into the persisted state.
  *
  * `updatedAt` advances only on a *valid* reading, so the gate's staleness check measures
  * "how long since we last knew the quota", not "how long since the sensor last ran".
+ *
+ * Only a payload with no limit at all counts towards going blind. One limit missing is a plan
+ * that does not report it, and that limit simply stays unknown — which the gate reads as pass.
  */
 export function advanceState(prev: State, payload: StatuslinePayload, now: number): State {
-  const window = payload.fiveHour;
-
   const tick = prev.tick + 1;
   // The header fields are absent from some payloads; keep the last ones we saw rather than
   // letting the prompt lose the session's identity to one thin poll.
   const session = payload.session ?? prev.session;
 
-  if (!window) {
+  if (LIMITS.every((limit) => !payload.windows[limit])) {
     const missingStreak = prev.missingStreak + 1;
     return { ...prev, tick, session, missingStreak, blind: missingStreak >= BLIND_DEBOUNCE };
   }
 
-  // A changed reset timestamp means a new 5-hour window: re-arm everything.
-  const rolledOver =
-    window.resetsAt !== null && prev.resetsAt !== null && window.resetsAt !== prev.resetsAt;
-
   return {
     tick,
     session,
-    pct: window.usedPercentage,
-    resetsAt: window.resetsAt,
-    updatedAt: now,
+    limits: {
+      session: advanceLimit(prev.limits.session, payload.windows.session, now),
+      weekly: advanceLimit(prev.limits.weekly, payload.windows.weekly, now),
+    },
     missingStreak: 0,
     blind: false,
-    disarmedUntil: rolledOver ? null : prev.disarmedUntil,
-    pausePromptInjectedTo: rolledOver ? [] : prev.pausePromptInjectedTo,
     halted: prev.halted,
   };
 }
@@ -56,9 +79,15 @@ const orange = (text: string) => `${ORANGE}${text}${RESET}`;
 const green = (text: string) => `${GREEN}${text}${RESET}`;
 const gray = (text: string) => `${GRAY}${text}${RESET}`;
 
-/** The name already says 10, so the reserve is only spelled out when it is not 10. */
-const label = (config: RunConfig) =>
-  config.reserve === DEFAULT_RESERVE ? 'spare10' : `spare10 (${config.reserve}%)`;
+/**
+ * The name already says 10, so the reserve is only spelled out when it is not 10 — as one
+ * figure when both limits share it, and by name when they do not.
+ */
+export function label(config: RunConfig): string {
+  const { session, weekly } = config.reserve;
+  if (session === weekly) return session === DEFAULT_RESERVE ? 'spare10' : `spare10 (${session}%)`;
+  return `spare10 (session ${session}%, weekly ${weekly}%)`;
+}
 
 /**
  * A small coloured marker says at a glance which state the breaker is in: gray while waiting
@@ -73,15 +102,22 @@ const label = (config: RunConfig) =>
 export function renderBadge(state: State, config: RunConfig, now: number): string {
   if (!config.badge) return '';
   if (state.blind) return '⚠ spare10 quota unavailable';
-  if (state.pct === null) return gray(`⧗ ${label(config)}`);
-  if (state.pct < tripPoint(config)) return green(`● ${label(config)}`);
+  if (LIMITS.every((limit) => state.limits[limit].pct === null)) return gray(`⧗ ${label(config)}`);
 
-  const disarmed = state.disarmedUntil !== null && now < state.disarmedUntil;
-  if (disarmed) return orange(`⨯ ${label(config)}`);
+  const into = LIMITS.filter((limit) => isIntoReserve(state, config, limit, now));
+  if (into.length === 0) return green(`● ${label(config)}`);
+
+  const holding = into.filter((limit) => {
+    const until = state.limits[limit].disarmedUntil;
+    return until === null || now >= until;
+  });
+  if (holding.length === 0) return orange(`⨯ ${label(config)}`);
 
   // The pause prompt has gone out: the breaker is no longer *about* to pause — it has. (A hard
   // stop needs no mark of its own; the process it would decorate is gone.)
-  if (state.pausePromptInjectedTo.length > 0) return orange(`⏸ ${label(config)}`);
+  if (holding.every((limit) => state.limits[limit].pausePromptInjectedTo.length > 0)) {
+    return orange(`⏸ ${label(config)}`);
+  }
 
   const icon = state.tick % 2 === 0 ? '⚠' : ' ';
   return orange(`${icon} Pausing at next tool call`);

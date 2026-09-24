@@ -11,16 +11,21 @@ import {
   RESUME_PROMPT,
   resumable,
   resumeArgs,
-  stoppedView,
+  stoppedView as stoppedViewOf,
   subcommandOf,
 } from '../src/launch';
-import type { StoppedSession } from '../src/types';
+import { DEFAULT_STATE, EMPTY_LIMIT, type Limit, type State, type StoppedSession } from '../src/types';
 import { buildSettings, readChainTarget, shellQuote } from '../src/settings';
 
 describe('parseArgs', () => {
   it('defaults to a 10% reserve and no pause prompt', () => {
     const { config, command } = parseArgs(['claude']);
-    expect(config).toMatchObject({ reserve: 10, pausePrompt: null, refresh: 2, badge: true });
+    expect(config).toMatchObject({
+      reserve: { session: 10, weekly: 10 },
+      pausePrompt: null,
+      refresh: 2,
+      badge: true,
+    });
     expect(command).toEqual(['claude']);
   });
 
@@ -31,7 +36,7 @@ describe('parseArgs', () => {
 
   it('does not consume flags that belong to the wrapped command', () => {
     const { config, command } = parseArgs(['claude', '--reserve', '40']);
-    expect(config.reserve).toBe(10);
+    expect(config.reserve).toEqual({ session: 10, weekly: 10 });
     expect(command).toEqual(['claude', '--reserve', '40']);
   });
 
@@ -49,11 +54,31 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--reserve', value, 'claude'])).toThrow(UsageError);
   });
 
+  it('sets both limits with --reserve', () => {
+    expect(parseArgs(['--reserve', '20', 'claude']).config.reserve).toEqual({ session: 20, weekly: 20 });
+  });
+
+  it('lets a limit-specific flag override --reserve, in either order', () => {
+    const after = parseArgs(['--reserve', '20', '--weekly-reserve', '5', 'claude']).config.reserve;
+    const before = parseArgs(['--weekly-reserve', '5', '--reserve', '20', 'claude']).config.reserve;
+    expect(after).toEqual({ session: 20, weekly: 5 });
+    expect(before).toEqual({ session: 20, weekly: 5 });
+  });
+
+  it('keeps the default for a limit only the other flag names', () => {
+    expect(parseArgs(['--session-reserve', '30', 'claude']).config.reserve).toEqual({ session: 30, weekly: 10 });
+  });
+
+  it.each([['--session-reserve'], ['--weekly-reserve']])('names %s when rejecting its value', (flag) => {
+    expect(() => parseArgs([flag, '100', 'claude'])).toThrow(new RegExp(`^${flag} must be between`));
+    expect(() => parseArgs([flag, '2.5', 'claude'])).toThrow(new RegExp(`^${flag} must be a whole number`));
+  });
+
   it('points the old --threshold flag at its replacement', () => {
     expect(() => parseArgs(['--threshold', '90', 'claude'])).toThrow(/--reserve 10/);
   });
 
-  it.each([['--reserve'], ['--pause-prompt'], ['--refresh']])(
+  it.each([['--reserve'], ['--session-reserve'], ['--weekly-reserve'], ['--pause-prompt'], ['--refresh']])(
     'rejects %s with no value',
     (flag) => {
       expect(() => parseArgs([flag])).toThrow(/requires a value/);
@@ -244,6 +269,23 @@ describe('backgrounded', () => {
 });
 
 describe('stoppedView', () => {
+  const NOW = Math.floor(Date.now() / 1000);
+  const stateAt: State = {
+    ...DEFAULT_STATE,
+    limits: {
+      session: { ...EMPTY_LIMIT, pct: 92, resetsAt: NOW + 3600, updatedAt: NOW },
+      weekly: { ...EMPTY_LIMIT, pct: 95, resetsAt: NOW + 3 * 86400, updatedAt: NOW },
+    },
+  };
+  const stoppedView = (records: StoppedSession[], home: string, limits: Limit[] = ['session']) =>
+    stoppedViewOf(records, stateAt, limits, home);
+
+  it('names the limit that fired, and when it re-arms', () => {
+    const view = stoppedView([record()], '/home/example', ['weekly']);
+    expect(view.headline).toBe('Weekly reserve reached. A background session is paused.');
+    expect(view.choices[0].hint).toMatch(/until the weekly limit resets \(\p{L}+\.? \d/u);
+  });
+
   const record = (overrides: Partial<StoppedSession> = {}): StoppedSession => ({
     sessionId: 'f7f9f966-d793-4063-acf3-2e064b89e997',
     backgroundId: 'f7f9f966',
@@ -255,14 +297,14 @@ describe('stoppedView', () => {
 
   it('names one paused session in the singular', () => {
     const view = stoppedView([record()], '/home/example');
-    expect(view.headline).toBe('Reserve reached. A background session is paused.');
+    expect(view.headline).toBe('Session reserve reached. A background session is paused.');
     expect(view.choices[0].label).toBe('Resume');
     expect(view.body).toContain('nightly refactor · ~/project');
   });
 
   it('counts them when there are several', () => {
     const view = stoppedView([record(), record({ sessionId: 'b', backgroundId: 'b' })], '/home/example');
-    expect(view.headline).toBe('Reserve reached. 2 background sessions are paused.');
+    expect(view.headline).toBe('Session reserve reached. 2 background sessions are paused.');
     expect(view.choices[0].label).toBe('Resume all');
   });
 

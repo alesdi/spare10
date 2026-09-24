@@ -1,6 +1,6 @@
 # spare10
 
-**A circuit breaker for Claude Code.** Use spare10 when you run low-priority agents on Claude Code and you want to keep a reserve of quota for important stuff. Spare10 watches your session limits and stops the agent when you reach 90%. Then it's up to you to decide whether to continue or not.
+**A circuit breaker for Claude Code.** Use spare10 when you run low-priority agents on Claude Code and you want to keep a reserve of quota for important stuff. Spare10 watches both your 5-hour session limit and your weekly limit, and stops the agent when either reaches 90%. Then it's up to you to decide whether to continue or not.
 
 To launch a session with spare10, just prefix the `claude` command with `spare10`:
 
@@ -10,7 +10,7 @@ spare10 claude
 
 ## How it works
 
-When usage starts eating the reserve (the last 10% by default) it stops Claude Code at the
+When usage starts eating the reserve of either limit (the last 10% by default) it stops Claude Code at the
 agent's next tool call — the whole process, subagents and background tasks included — and asks
 you in the terminal whether to carry on:
 
@@ -26,7 +26,7 @@ Escape leaves the session alone. The selection starts on *Stop here*, so a stray
 spends the reserve.
 
 Choose **Resume** and the session picks up right where it stopped, with its whole conversation,
-and spare10 stays quiet until the limit resets. Choose **Stop here** and you are back at your
+and spare10 stays quiet until the limit that stopped it resets. Choose **Stop here** and you are back at your
 shell with the session saved; `claude --resume <id>` picks it up later, when the window has
 reset. Terminals that cannot draw the panel — a pipe, `TERM=dumb`, `NO_COLOR`, a narrow
 window — get the plain one-line question instead, and a run with nobody attached carries on
@@ -45,8 +45,9 @@ it rode in on, and a subagent left untold would keep working. It arrives with th
 attached, since an instruction turning up mid-turn otherwise has no context:
 
 ```
-spare10 budget guard. You have reached the safe usage limit for this session
-(into your 10% reserve · 9% of quota left · resets 14:00). Wrap up your work and stop.
+spare10 budget guard. You have reached the safe session usage limit (into your 10% session
+reserve · 9% of session quota left · resets 14:00). Immediately wrap up your work and stop.
+Immediately stop any subagent, unless the user instructs otherwise.
 
 User instructions: Finish this block, commit, then stop.
 ```
@@ -72,32 +73,43 @@ than installing something that cannot run.
 ```
 spare10 [options] <command> [args...]
 
-  --reserve <1-99>       Keep this much of the 5-hour window back for yourself (default: 10)
-  --pause-prompt <text>  Inject this instruction instead of stopping
-  --refresh <seconds>    Quota poll interval (default: 2)
-  --no-badge             Never draw the spare10 marker in the status line
-  doctor                 Report what spare10 detected and what it would do
+  --reserve <1-99>          Keep this much of both limits back for yourself (default: 10)
+  --session-reserve <1-99>  Override the reserve for the 5-hour session limit only
+  --weekly-reserve <1-99>   Override the reserve for the weekly limit only
+  --pause-prompt <text>     Inject this instruction instead of stopping
+  --refresh <seconds>       Quota poll interval (default: 2)
+  --no-badge                Never draw the spare10 marker in the status line
+  doctor                    Report what spare10 detected and what it would do
 ```
 
 Everything after the command passes through untouched, so `spare10 claude --resume` works as
 you'd expect.
 
 `--reserve` is the quota you keep, not the level that trips — `--reserve 20` stops the agent
-with a fifth of the window still in hand. It takes whole numbers only: Claude Code reports
-quota in integer percentages, so `--reserve 10.5` is rejected rather than silently rounded.
+with a fifth of the window still in hand. It applies to both limits, each guarded on its own:
+whichever reaches its reserve first stops the agent, and the panel says which. To set one limit
+apart, `--session-reserve` and `--weekly-reserve` override it, whatever order the flags come
+in — `spare10 --reserve 20 --weekly-reserve 5 claude` keeps a fifth of every 5-hour window but
+only a twentieth of the week. Reserves take whole numbers only: Claude Code reports quota in
+integer percentages, so `--reserve 10.5` is rejected rather than silently rounded.
+
+A plan that does not report the weekly limit is guarded on the session limit alone.
 
 The status line shows a gray `⧗ spare10` until the first quota reading arrives, a green
 `● spare10` while the reserve is untouched, then an orange
-`⚠ Pausing at next tool call` once it is reached, its icon pulsing once per refresh. Once you
+`⚠ Pausing at next tool call` once either limit reaches it, its icon pulsing once per refresh. Once you
 have consented it drops back to a quiet orange `⨯ spare10`; once a `--pause-prompt` has gone
 out it shows `⏸ spare10`. A non-default reserve is spelled out either way, as
-`● spare10 (20%)` — the name already accounts for 10.
+`● spare10 (20%)` — the name already accounts for 10 — or, when the two limits differ, as
+`● spare10 (session 20%, weekly 5%)`.
 
 The pulse is driven by spare10's own render cadence rather than the ANSI blink attribute,
 which most terminals ignore.
 
-Consenting at the pre-flight prompt counts for the whole window: the session starts disarmed
-rather than stopping again on the first tool call.
+Consent counts for the whole window of the limit you consented to, and only that limit: resume
+past the session limit and spare10 still stops you at the weekly one. Consenting at the
+pre-flight prompt works the same way, so the session starts disarmed rather than stopping again
+on the first tool call.
 
 State lives under `~/.spare10`; set `SPARE10_HOME` to put it somewhere else.
 
@@ -182,7 +194,6 @@ Run `spare10 doctor` to see exactly what it detected.
 Not in this version, deliberately:
 
 - **Headless / `-p` mode.** No status line renders, so there's no sensor. spare10 does nothing.
-- **The weekly limit.** Only the 5-hour window is watched.
 - **Auto-resume** when the window resets.
 - **Model downgrade** (Opus → Sonnet) as an alternative to stopping.
 - **Overshoot correction.** The reserve is indicative, not predictive: readings land at 1%
@@ -209,7 +220,7 @@ Not in this version, deliberately:
 
 ```bash
 npm install
-npm test          # 254 tests: unit, plus the hooks and CLI as real subprocesses
+npm test          # 294 tests: unit, plus the hooks and CLI as real subprocesses
 npm run typecheck
 npm run build     # single dependency-free bundle in dist/
 npm run demo      # the pause prompt at 91% usage, without burning a session
@@ -218,8 +229,8 @@ npm run demo      # the pause prompt at 91% usage, without burning a session
 `npm run demo` draws the real panel from `src/`, so it cannot drift from what spare10 shows.
 It is interactive by default; `-- --static` prints every state at once (both selections, the
 no-colour fallback and the plain line prompt), `-- --preflight` shows the question asked
-before launch rather than the one after a stop, and `-- --width 64` forces a narrower
-terminal.
+before launch rather than the one after a stop, `-- --weekly` has the weekly limit trip
+instead of the session one, and `-- --width 64` forces a narrower terminal.
 
 Test fixtures are real payloads captured from a live Claude Code session, sanitized. When
 Anthropic changes the status line schema, the tolerant parser keeps spare10 failing open and

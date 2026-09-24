@@ -42,25 +42,42 @@ export interface StoppedSession {
   at: number;
 }
 
-/** Persisted quota state for one spare10 run. All fields tolerate being absent. */
-export interface State {
-  /** Last observed five_hour.used_percentage (0-100), or null if never seen. */
+/**
+ * The two quota limits Claude Code reports: `five_hour` (the session limit) and `seven_day`
+ * (the weekly one). Each is guarded on its own, with its own reserve, consent and rollover.
+ */
+export type Limit = 'session' | 'weekly';
+export const LIMITS: readonly Limit[] = ['session', 'weekly'];
+
+/** Everything spare10 knows about one limit. All fields tolerate being absent. */
+export interface LimitState {
+  /** Last observed used_percentage (0-100), or null if never seen. */
   pct: number | null;
-  /** Epoch seconds when the current 5-hour window resets, or null. */
+  /** Epoch seconds when this limit's window resets, or null. */
   resetsAt: number | null;
   /** Epoch seconds of the last *valid* reading. Drives staleness, not liveness. */
   updatedAt: number | null;
-  /** Consecutive sensor invocations with no rate_limits in the payload. */
+  /**
+   * Epoch seconds until which this limit stays quiet, or null. Per limit because consent is
+   * given for the limit that tripped: resuming past the session limit says nothing about the
+   * weekly one.
+   */
+  disarmedUntil: number | null;
+  /**
+   * Agents that have received --pause-prompt for this limit this window, by key (see
+   * `agentKey`). Each agent gets the instruction once, on its first gated call, and passes
+   * freely after that.
+   */
+  pausePromptInjectedTo: string[];
+}
+
+/** Persisted quota state for one spare10 run. All fields tolerate being absent. */
+export interface State {
+  limits: Record<Limit, LimitState>;
+  /** Consecutive sensor invocations whose payload carried no limit at all. */
   missingStreak: number;
   /** True once missingStreak crosses the debounce threshold. */
   blind: boolean;
-  /** Epoch seconds until which the gate stays quiet, or null. */
-  disarmedUntil: number | null;
-  /**
-   * Agents that have received --pause-prompt this window, by key (see `agentKey`). Each agent
-   * gets the instruction once, on its first gated call, and passes freely after that.
-   */
-  pausePromptInjectedTo: string[];
   /** Session id of the Claude Code process the gate stopped, so the launcher can offer to resume it. */
   halted: string | null;
   /** Increments once per sensor run. Drives the status line pulse. */
@@ -71,8 +88,8 @@ export interface State {
 
 /** Per-run configuration, written by the launcher and read by sensor/gate/post. */
 export interface RunConfig {
-  /** Percentage of the 5-hour window held back for the human. Trips once usage eats into it. */
-  reserve: number;
+  /** Percentage of each limit held back for the human. A limit trips once usage eats into it. */
+  reserve: Record<Limit, number>;
   /** Non-blocking instruction injected on trip instead of asking. */
   pausePrompt: string | null;
   /** statusLine refreshInterval in seconds; also the staleness unit. */
@@ -83,14 +100,18 @@ export interface RunConfig {
   chain: string | null;
 }
 
-export const DEFAULT_STATE: State = {
+export const EMPTY_LIMIT: LimitState = {
   pct: null,
   resetsAt: null,
   updatedAt: null,
-  missingStreak: 0,
-  blind: false,
   disarmedUntil: null,
   pausePromptInjectedTo: [],
+};
+
+export const DEFAULT_STATE: State = {
+  limits: { session: EMPTY_LIMIT, weekly: EMPTY_LIMIT },
+  missingStreak: 0,
+  blind: false,
   halted: null,
   tick: 0,
   session: null,
@@ -111,7 +132,7 @@ export function agentKey(sessionId: string | null, agentId: string | null): stri
   return `${sessionId ?? UNKNOWN_SESSION}:${agentId ?? MAIN_AGENT}`;
 }
 
-/** The reserve the tool is named after. Shown in the status line only when overridden. */
+/** The reserve the tool is named after, for each limit. Shown in the status line only when overridden. */
 export const DEFAULT_RESERVE = 10;
 
 /** Status line poll interval. The first payload of a session carries no rate_limits, so this
@@ -119,7 +140,7 @@ export const DEFAULT_RESERVE = 10;
 export const DEFAULT_REFRESH = 2;
 
 export const DEFAULT_CONFIG: RunConfig = {
-  reserve: DEFAULT_RESERVE,
+  reserve: { session: DEFAULT_RESERVE, weekly: DEFAULT_RESERVE },
   pausePrompt: null,
   refresh: DEFAULT_REFRESH,
   badge: true,
@@ -135,9 +156,9 @@ export const STALE_REFRESH_MULTIPLE = 3;
 /** Fallback disarm span when resets_at is unknown, in seconds. */
 export const FALLBACK_DISARM_SECONDS = 3600;
 
-/** Usage percentage at which the reserve starts being consumed. */
-export function tripPoint(config: Pick<RunConfig, 'reserve'>): number {
-  return 100 - config.reserve;
+/** Usage percentage at which a limit's reserve starts being consumed. */
+export function tripPoint(config: Pick<RunConfig, 'reserve'>, limit: Limit): number {
+  return 100 - config.reserve[limit];
 }
 
 /** Quota still untouched, as a percentage. */

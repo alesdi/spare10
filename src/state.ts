@@ -9,9 +9,12 @@ import {
 import { join } from 'node:path';
 import {
   DEFAULT_STATE,
+  EMPTY_LIMIT,
   EMPTY_SESSION,
   DEFAULT_CONFIG,
   FALLBACK_DISARM_SECONDS,
+  type Limit,
+  type LimitState,
   type SessionInfo,
   type State,
   type RunConfig,
@@ -59,18 +62,40 @@ function readSession(v: unknown): SessionInfo | null {
   };
 }
 
+function readLimit(v: unknown): LimitState {
+  if (typeof v !== 'object' || v === null) return { ...EMPTY_LIMIT };
+  const raw = v as Record<string, unknown>;
+  return {
+    pct: num(raw['pct'], null),
+    resetsAt: num(raw['resetsAt'], null),
+    updatedAt: num(raw['updatedAt'], null),
+    disarmedUntil: num(raw['disarmedUntil'], null),
+    pausePromptInjectedTo: strings(raw['pausePromptInjectedTo']),
+  };
+}
+
+/**
+ * Both limits, from either layout. Before the weekly limit was guarded the session limit's
+ * fields sat at the top level; an earlier run's state still seeds a new one, so that layout
+ * reads as the session limit with nothing known about the weekly one.
+ */
+function readLimits(raw: Record<string, unknown>): Record<Limit, LimitState> {
+  const limits = raw['limits'];
+  if (typeof limits !== 'object' || limits === null) {
+    return { session: readLimit(raw), weekly: { ...EMPTY_LIMIT } };
+  }
+  const byName = limits as Record<string, unknown>;
+  return { session: readLimit(byName['session']), weekly: readLimit(byName['weekly']) };
+}
+
 /** Never throws. A corrupt or missing state file reads as the default (fail-open) state. */
 export function readState(runDir: string): State {
   const raw = readJson(statePath(runDir));
   if (!raw) return { ...DEFAULT_STATE };
   return {
-    pct: num(raw['pct'], null),
-    resetsAt: num(raw['resetsAt'], null),
-    updatedAt: num(raw['updatedAt'], null),
+    limits: readLimits(raw),
     missingStreak: num(raw['missingStreak'], 0) ?? 0,
     blind: bool(raw['blind'], false),
-    disarmedUntil: num(raw['disarmedUntil'], null),
-    pausePromptInjectedTo: strings(raw['pausePromptInjectedTo']),
     halted: typeof raw['halted'] === 'string' && raw['halted'] ? raw['halted'] : null,
     tick: num(raw['tick'], 0) ?? 0,
     session: readSession(raw['session']),
@@ -148,14 +173,25 @@ export function clearStopped(runDir: string, sessionIds: string[]): void {
   }
 }
 
+const clampReserve = (value: number) => Math.min(99, Math.max(1, Math.round(value)));
+
+/** One figure for both limits, as older runs wrote it, or one per limit. */
+function readReserve(v: unknown): Record<Limit, number> {
+  const single = num(v, null);
+  if (single !== null) return { session: clampReserve(single), weekly: clampReserve(single) };
+  const byName = typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : {};
+  const one = (limit: Limit) =>
+    clampReserve(num(byName[limit], DEFAULT_CONFIG.reserve[limit]) ?? DEFAULT_CONFIG.reserve[limit]);
+  return { session: one('session'), weekly: one('weekly') };
+}
+
 /** Never throws. Missing or partial config falls back to defaults field by field. */
 export function readRunConfig(runDir: string): RunConfig {
   const raw = readJson(configPath(runDir));
   if (!raw) return { ...DEFAULT_CONFIG };
-  const reserve = num(raw['reserve'], DEFAULT_CONFIG.reserve) ?? DEFAULT_CONFIG.reserve;
   const refresh = num(raw['refresh'], DEFAULT_CONFIG.refresh) ?? DEFAULT_CONFIG.refresh;
   return {
-    reserve: Math.min(99, Math.max(1, Math.round(reserve))),
+    reserve: readReserve(raw['reserve']),
     pausePrompt: typeof raw['pausePrompt'] === 'string' && raw['pausePrompt'] ? raw['pausePrompt'] : null,
     refresh: Math.max(1, Math.round(refresh)),
     badge: bool(raw['badge'], DEFAULT_CONFIG.badge),
@@ -164,15 +200,23 @@ export function readRunConfig(runDir: string): RunConfig {
 }
 
 /**
- * How long to stay quiet once the user has consented (or the pause prompt has fired).
- * Anchored to the window reset so the breaker re-arms exactly when the quota does.
+ * Record the user's consent to run into the reserve.
+ *
+ * Consent covers the limits that are holding right now, each until its own window resets, so the
+ * breaker re-arms exactly when that quota does. A limit not yet into its reserve is left armed:
+ * saying yes at the session limit is not a yes to the weekly one.
  */
-export function disarmUntil(state: State, now: number): number {
-  return state.resetsAt ?? now + FALLBACK_DISARM_SECONDS;
+export function consent(state: State, limits: Limit[], now: number): State {
+  const next = { ...state.limits };
+  for (const limit of limits) {
+    const reading = state.limits[limit];
+    next[limit] = { ...reading, disarmedUntil: reading.resetsAt ?? now + FALLBACK_DISARM_SECONDS };
+  }
+  return { ...state, limits: next };
 }
 
 /**
- * Choose a reading from an earlier run to start a new session with.
+ * Choose a reading from an earlier run to start a new session with, limit by limit.
  *
  * Claude Code omits rate_limits from the first status line payload of every session, so a
  * fresh run is blind for one poll interval — long enough for the opening turn to slip past
@@ -184,14 +228,23 @@ export function disarmUntil(state: State, now: number): number {
  * previous one was given.
  */
 export function pickSeed(candidates: State[], now: number): State | null {
-  const usable = candidates.filter(
-    (s): s is State & { pct: number; resetsAt: number; updatedAt: number } =>
-      s.pct !== null && s.updatedAt !== null && s.resetsAt !== null && s.resetsAt > now,
-  );
-  const best = usable.reduce<(State & { updatedAt: number }) | null>(
-    (winner, s) => (winner === null || s.updatedAt > winner.updatedAt ? s : winner),
-    null,
-  );
-  if (best === null) return null;
-  return { ...DEFAULT_STATE, pct: best.pct, resetsAt: best.resetsAt, updatedAt: best.updatedAt };
+  const seedLimit = (limit: Limit): LimitState | null => {
+    let best: LimitState | null = null;
+    for (const candidate of candidates) {
+      const s = candidate.limits[limit];
+      if (s.pct === null || s.updatedAt === null || s.resetsAt === null || s.resetsAt <= now) continue;
+      if (best === null || s.updatedAt > (best.updatedAt as number)) best = s;
+    }
+    return best === null
+      ? null
+      : { ...EMPTY_LIMIT, pct: best.pct, resetsAt: best.resetsAt, updatedAt: best.updatedAt };
+  };
+
+  const session = seedLimit('session');
+  const weekly = seedLimit('weekly');
+  if (session === null && weekly === null) return null;
+  return {
+    ...DEFAULT_STATE,
+    limits: { session: session ?? { ...EMPTY_LIMIT }, weekly: weekly ?? { ...EMPTY_LIMIT } },
+  };
 }

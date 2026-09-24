@@ -8,6 +8,7 @@ import {
   plainPrompt,
   renderMark,
   renderPanel,
+  reserveTag,
   tildePath,
   usageBar,
   visibleWidth,
@@ -16,6 +17,7 @@ import {
 } from '../src/panel';
 import { stoppedView } from '../src/launch';
 import { DEFAULT_CONFIG, DEFAULT_STATE, type SessionInfo, type State, type StoppedSession } from '../src/types';
+import { stateWith, type StateOverrides } from './helpers';
 
 const FULL: Caps = { color: true, truecolor: true, unicode: true, columns: 90 };
 const PLAIN: Caps = { color: false, truecolor: false, unicode: false, columns: 70 };
@@ -28,14 +30,8 @@ const SESSION: SessionInfo = {
   fastMode: false,
 };
 
-const state = (over: Partial<State> = {}): State => ({
-  ...DEFAULT_STATE,
-  pct: 91,
-  resetsAt: 1_789_041_600,
-  updatedAt: 1_789_020_000,
-  session: SESSION,
-  ...over,
-});
+const state = (over: StateOverrides = {}): State =>
+  stateWith({ pct: 91, resetsAt: 1_789_041_600, updatedAt: 1_789_020_000, session: SESSION, ...over });
 
 const view: PromptView = {
   session: SESSION,
@@ -47,11 +43,11 @@ const view: PromptView = {
   ],
 };
 
-const panel = (caps: Caps, selected = 0, over: Partial<State> = {}) =>
+const panel = (caps: Caps, selected = 0, over: StateOverrides = {}) =>
   renderPanel({ view, state: state(over), config: DEFAULT_CONFIG, selected, caps, home: '/Users/me' });
 
 /** The framed card, without the session header standing above it. */
-const card = (caps: Caps, selected = 0, over: Partial<State> = {}) => {
+const card = (caps: Caps, selected = 0, over: StateOverrides = {}) => {
   const lines = panel(caps, selected, over);
   const top = lines.findIndex((line) => line.startsWith('╭') || line.startsWith('+'));
   return lines.slice(top);
@@ -104,6 +100,23 @@ describe('renderPanel', () => {
     expect(drawn).toContain('v2.1.278');
     expect(drawn).toContain('Opus 5 (1M context) with high effort');
     expect(drawn).toContain('~/Developer/spare10');
+  });
+
+  it('draws a labelled bar for each limit it knows', () => {
+    const drawn = card(PLAIN, 0, { weekly: { pct: 64, resetsAt: 1_789_257_600, updatedAt: 1_789_020_000 } });
+    expect(drawn.some((line) => /session +#+-* +91% used/.test(line))).toBe(true);
+    expect(drawn.some((line) => /weekly +#+-* +64% used/.test(line))).toBe(true);
+  });
+
+  it('leaves out a limit the plan does not report', () => {
+    expect(card(PLAIN).join('\n')).not.toContain('weekly');
+  });
+
+  it('stays inside its frame at the narrowest width, whatever it has to drop', () => {
+    const narrow: Caps = { ...PLAIN, columns: MIN_PANEL_WIDTH };
+    const lines = card(narrow, 0, { weekly: { pct: 93, resetsAt: 1_789_257_600, updatedAt: 1_789_020_000 } });
+    const width = visibleWidth(lines[0] as string);
+    for (const line of lines) expect(visibleWidth(line)).toBe(width);
   });
 
   it('drops the usage bar rather than inventing a figure when the quota is unknown', () => {
@@ -164,11 +177,25 @@ describe('tildePath', () => {
 
 describe('factsLine', () => {
   it('says so plainly when there is no reading', () => {
-    expect(factsLine({ ...DEFAULT_STATE })).toContain('quota unknown');
+    expect(factsLine({ ...DEFAULT_STATE }, 'session')).toContain('quota unknown');
   });
 
   it('leads with what is left', () => {
-    expect(factsLine(state())).toMatch(/^91% used · 9% left · resets /);
+    expect(factsLine(state(), 'session')).toMatch(/^91% used · 9% left · resets /);
+  });
+
+  it('drops the used figure when asked to be short', () => {
+    expect(factsLine(state(), 'session', true)).toMatch(/^9% left · resets /);
+  });
+});
+
+describe('reserveTag', () => {
+  it('names one figure when both limits share it', () => {
+    expect(reserveTag(DEFAULT_CONFIG)).toBe('10% reserve');
+  });
+
+  it('gives both, in limit order, when they differ', () => {
+    expect(reserveTag({ ...DEFAULT_CONFIG, reserve: { session: 20, weekly: 5 } })).toBe('20% · 5% reserve');
   });
 });
 
@@ -195,7 +222,7 @@ describe('the stopped-background panel', () => {
 
   const stopped = (caps: Caps, selected = 0) => {
     const lines = renderPanel({
-      view: stoppedView(records, '/Users/me'),
+      view: stoppedView(records, state(), ['session'], '/Users/me'),
       state: state(),
       config: DEFAULT_CONFIG,
       selected,

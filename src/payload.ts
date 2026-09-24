@@ -7,10 +7,9 @@
  * can fail open.
  */
 
-import type { SessionInfo } from './types';
+import type { Limit, SessionInfo } from './types';
 
-
-export interface FiveHourWindow {
+export interface QuotaWindow {
   /** Integer 0-100. The API reports whole percentages only. */
   usedPercentage: number;
   /** Epoch seconds, or null if absent. */
@@ -19,7 +18,8 @@ export interface FiveHourWindow {
 
 export interface StatuslinePayload {
   sessionId: string | null;
-  fiveHour: FiveHourWindow | null;
+  /** The limits this payload reported. A plan may report one and not the other. */
+  windows: Partial<Record<Limit, QuotaWindow>>;
   /** Null when the payload carried nothing we could use to describe the session. */
   session: SessionInfo | null;
 }
@@ -51,8 +51,19 @@ function parseSession(obj: Record<string, unknown>): SessionInfo | null {
   return described ? session : null;
 }
 
+/** Where each limit lives under `rate_limits`. */
+const WINDOW_KEYS: Record<Limit, string> = { session: 'five_hour', weekly: 'seven_day' };
+
+function parseWindow(raw: unknown): QuotaWindow | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const w = raw as Record<string, unknown>;
+  const pct = asFiniteNumber(w['used_percentage']);
+  if (pct === null) return null;
+  return { usedPercentage: Math.min(100, Math.max(0, pct)), resetsAt: asFiniteNumber(w['resets_at']) };
+}
+
 export function parseStatuslinePayload(raw: string): StatuslinePayload {
-  const nothing: StatuslinePayload = { sessionId: null, fiveHour: null, session: null };
+  const nothing: StatuslinePayload = { sessionId: null, windows: {}, session: null };
 
   let root: unknown;
   try {
@@ -66,22 +77,13 @@ export function parseStatuslinePayload(raw: string): StatuslinePayload {
   const sessionId = typeof obj['session_id'] === 'string' ? obj['session_id'] : null;
   const session = parseSession(obj);
 
+  const windows: Partial<Record<Limit, QuotaWindow>> = {};
   const limits = obj['rate_limits'];
-  if (typeof limits !== 'object' || limits === null) return { sessionId, fiveHour: null, session };
-
-  const window = (limits as Record<string, unknown>)['five_hour'];
-  if (typeof window !== 'object' || window === null) return { sessionId, fiveHour: null, session };
-
-  const w = window as Record<string, unknown>;
-  const pct = asFiniteNumber(w['used_percentage']);
-  if (pct === null) return { sessionId, fiveHour: null, session };
-
-  return {
-    sessionId,
-    session,
-    fiveHour: {
-      usedPercentage: Math.min(100, Math.max(0, pct)),
-      resetsAt: asFiniteNumber(w['resets_at']),
-    },
-  };
+  if (typeof limits === 'object' && limits !== null) {
+    for (const [limit, key] of Object.entries(WINDOW_KEYS) as [Limit, string][]) {
+      const window = parseWindow((limits as Record<string, unknown>)[key]);
+      if (window !== null) windows[limit] = window;
+    }
+  }
+  return { sessionId, windows, session };
 }
