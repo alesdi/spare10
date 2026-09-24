@@ -9,6 +9,7 @@ import {
   renderMark,
   renderPanel,
   reserveTag,
+  thresholdMarker,
   tildePath,
   usageBar,
   visibleWidth,
@@ -152,6 +153,47 @@ describe('renderMark', () => {
 
   it('is left out entirely when the terminal cannot colour it', () => {
     expect(renderMark(PLAIN)).toEqual([]);
+  });
+});
+
+describe('thresholdMarker', () => {
+  it('points at the first cell of the reserve', () => {
+    const p = palette(PLAIN);
+    expect(thresholdMarker(90, 20, p, false, 'up')).toBe(`${' '.repeat(18)}^`);
+    expect(thresholdMarker(50, 10, p, true, 'down')).toBe(`${' '.repeat(5)}▼`);
+  });
+
+  it('never points past the end of the bar', () => {
+    expect(thresholdMarker(100, 10, palette(PLAIN), false, 'up')).toBe(`${' '.repeat(9)}^`);
+  });
+});
+
+describe('threshold arrows in the panel', () => {
+  const weekly = { weekly: { pct: 64, resetsAt: 1_789_257_600, updatedAt: 1_789_020_000 } };
+  const arrows = (lines: string[]) => lines.filter((line) => /^\|\s+[v^]\s+\|$/.test(line));
+  /** Where the arrow is, and where the bar next to it starts, counted in columns. */
+  const offset = (line: string, glyph: string) => line.indexOf(glyph);
+
+  it('marks the threshold above the top bar and below the bottom one', () => {
+    const lines = card(PLAIN, 0, weekly);
+    const [down, up] = arrows(lines);
+    const top = lines.findIndex((line) => line.includes('session  '));
+    expect(lines[top - 1]).toBe(down);
+    expect(lines[top + 2]).toBe(up);
+    expect(offset(down as string, 'v')).toBe(offset(up as string, '^'));
+  });
+
+  it('marks each bar at its own threshold when the reserves differ', () => {
+    const config = { ...DEFAULT_CONFIG, reserve: { session: 50, weekly: 10 } };
+    const lines = renderPanel({ view, state: state(weekly), config, selected: 0, caps: PLAIN, home: '/Users/me' });
+    const down = lines.find((line) => /^\|\s+v\s+\|$/.test(line)) as string;
+    const up = lines.find((line) => /^\|\s+\^\s+\|$/.test(line)) as string;
+    expect(offset(down, 'v')).toBeLessThan(offset(up, '^'));
+  });
+
+  it('draws no arrows when the panel is too narrow for bars', () => {
+    const narrow: Caps = { ...PLAIN, columns: MIN_PANEL_WIDTH };
+    expect(arrows(card(narrow, 0, { weekly: { ...weekly.weekly, pct: 93 } }))).toEqual([]);
   });
 });
 
