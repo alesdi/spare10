@@ -6,6 +6,8 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-09-24
+
 ### Added
 
 - **The weekly limit is guarded too.** Claude Code reports the weekly quota alongside the 5-hour
@@ -15,6 +17,8 @@ All notable changes to spare10 are recorded here. The format follows
   does not report the weekly limit is guarded on the session limit alone, as before.
 - **`--session-reserve` and `--weekly-reserve`** set one limit's reserve apart from the other.
   They override `--reserve` whatever order the flags come in.
+- **The pause panel shows a bar per limit.** Only the limit into its reserve is drawn in orange,
+  the other in gray, and arrows above and below the bars mark where each reserve begins.
 - **`spare10 doctor` reports each limit separately**, with a weekday on resets more than a day
   away.
 
@@ -162,7 +166,8 @@ Initial release.
 - `spare10 doctor` to check the installation and the current run.
 - Install script, npm publishing with provenance, and GitHub Releases.
 
-[Unreleased]: https://github.com/alesdi/spare10/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/alesdi/spare10/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/alesdi/spare10/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/alesdi/spare10/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/alesdi/spare10/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/alesdi/spare10/compare/v0.3.0...v0.3.1
