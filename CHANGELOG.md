@@ -6,6 +6,29 @@ All notable changes to spare10 are recorded here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **The weekly limit is guarded too.** Claude Code reports the weekly quota alongside the 5-hour
+  one, and spare10 now watches both: whichever limit reaches its reserve first stops the agent,
+  and every message names which one it was. Each limit has its own consent — resuming past the
+  session limit leaves the weekly one armed — and re-arms when its own window resets. A plan that
+  does not report the weekly limit is guarded on the session limit alone, as before.
+- **`--session-reserve` and `--weekly-reserve`** set one limit's reserve apart from the other.
+  They override `--reserve` whatever order the flags come in.
+- **`spare10 doctor` reports each limit separately**, with a weekday on resets more than a day
+  away.
+
+### Changed
+
+- **The default 10% reserve now applies to the weekly limit as well.** After upgrading, a session
+  stops once less than a tenth of the week is left, not only a tenth of the 5-hour window.
+  `--reserve` sets both; pass `--weekly-reserve` to keep a different share of the week.
+
+### Fixed
+
+- **The pause panel stays inside its frame at narrow widths.** Long headlines and the plain-text
+  key hint used to run past the right border.
+
 ## [0.5.0] — 2026-09-23
 
 ### Added

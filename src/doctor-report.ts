@@ -6,11 +6,17 @@ import { diagnose, formatClock, formatDuration } from './doctor';
 import { claudeSettingsPath, runsRoot, selfPath } from './launch';
 import { readChainTarget } from './settings';
 import { nowSeconds, readRunConfig, readState, readStopped } from './state';
+import { LIMITS, type Limit } from './types';
 
 declare const __SPARE10_VERSION__: string;
 const VERSION = typeof __SPARE10_VERSION__ === 'string' ? __SPARE10_VERSION__ : 'dev';
 
 const MARK = { ok: '✓', warn: '⚠', info: '·' } as const;
+
+const LIMIT_TITLES: Record<Limit, string> = {
+  session: 'Session limit (5-hour)',
+  weekly: 'Weekly limit',
+};
 
 /** Every run directory, newest first. */
 function allRuns(root: string): string[] {
@@ -99,10 +105,8 @@ export function runDoctor(): number {
 
   const config = readRunConfig(runDir);
   const state = readState(runDir);
-  const verdict = diagnose(state, config, now);
 
   out(`Latest run  ${runDir}`);
-  out(`  ${MARK.info} reserve       ${config.reserve}% of the 5-hour window`);
   out(
     `  ${MARK.info} on trip       ${
       config.pausePrompt === null
@@ -112,24 +116,35 @@ export function runDoctor(): number {
   );
   out(`  ${MARK.info} refresh       ${config.refresh}s`);
 
-  if (state.pct !== null && state.updatedAt !== null) {
-    out(`  ${MARK.ok} quota         ${state.pct}% used, ${100 - state.pct}% left`);
-    const age = now - state.updatedAt;
-    out(
-      `  ${MARK.info} last reading  ${formatDuration(age)} ago` +
-        (age > config.refresh * 3 ? ' (no session running; still valid for this window)' : ''),
-    );
-  }
-  if (state.resetsAt !== null) {
-    out(`  ${MARK.info} resets        ${formatClock(state.resetsAt)} (in ${formatDuration(state.resetsAt - now)})`);
-  }
+  // Only a blind sensor is a fault, and it is blind for both limits at once. A stale reading
+  // just means no session is running, and a tripped breaker means spare10 is doing its job.
+  if (state.blind) problems += 1;
 
-  // Only a blind sensor is a fault. A stale reading just means no session is running, and
-  // a tripped breaker means spare10 is doing exactly its job.
-  const faulty = verdict.status === 'blind';
-  if (faulty) problems += 1;
-  const mark = faulty ? MARK.warn : verdict.status === 'no-data' ? MARK.info : MARK.ok;
-  out(`  ${mark} state         ${verdict.status.toUpperCase()} — ${verdict.detail}`);
+  for (const limit of LIMITS) {
+    const reading = state.limits[limit];
+    const verdict = diagnose(state, config, limit, now);
+
+    out();
+    out(LIMIT_TITLES[limit]);
+    out(`  ${MARK.info} reserve       ${config.reserve[limit]}%`);
+    if (reading.pct !== null && reading.updatedAt !== null) {
+      out(`  ${MARK.ok} quota         ${reading.pct}% used, ${100 - reading.pct}% left`);
+      const age = now - reading.updatedAt;
+      out(
+        `  ${MARK.info} last reading  ${formatDuration(age)} ago` +
+          (age > config.refresh * 3 ? ' (no session running; still valid for this window)' : ''),
+      );
+    }
+    if (reading.resetsAt !== null) {
+      out(
+        `  ${MARK.info} resets        ${formatClock(reading.resetsAt, now)} ` +
+          `(in ${formatDuration(reading.resetsAt - now)})`,
+      );
+    }
+    const mark =
+      verdict.status === 'blind' ? MARK.warn : verdict.status === 'no-data' ? MARK.info : MARK.ok;
+    out(`  ${mark} state         ${verdict.status.toUpperCase()} — ${verdict.detail}`);
+  }
 
   // Background sessions are stopped without anyone being asked: nothing is attached to them to
   // ask on. When the launcher has already exited — as it has after `--bg` — this report is the

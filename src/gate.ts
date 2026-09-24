@@ -4,7 +4,7 @@ import { findBackground, listAgents, stopBackground } from './background';
 import { decide } from './decide';
 import { parseHookPayload } from './hook-payload';
 import { nowSeconds, pidPath, readRunConfig, readState, recordStopped, writeState } from './state';
-import { agentKey, type State } from './types';
+import { agentKey, type Limit, type State } from './types';
 
 /**
  * Consume stdin without parsing it. Claude Code writes the full hook payload — which can be
@@ -120,6 +120,18 @@ function halt(runDir: string, state: State, sessionId: string | null, reason: st
   return 0;
 }
 
+/** Mark an agent as told about each limit the instruction covered. */
+function told(state: State, limits: Limit[], agent: string): State {
+  const next = { ...state.limits };
+  for (const limit of limits) {
+    const reading = next[limit];
+    if (!reading.pausePromptInjectedTo.includes(agent)) {
+      next[limit] = { ...reading, pausePromptInjectedTo: [...reading.pausePromptInjectedTo, agent] };
+    }
+  }
+  return { ...state, limits: next };
+}
+
 export function runGate(runDir: string): number {
   const config = readRunConfig(runDir);
   const state = readState(runDir);
@@ -144,10 +156,7 @@ export function runGate(runDir: string): number {
       // Record this agent as told, so its next call passes and it can actually comply. The
       // gate stays armed for everyone else. Parallel subagents can race this read-modify-write
       // and drop an entry; the cost is one repeated instruction, so no locking.
-      writeState(runDir, {
-        ...state,
-        pausePromptInjectedTo: [...state.pausePromptInjectedTo, agent],
-      });
+      writeState(runDir, told(state, decision.limits, agent));
       emit({ hookEventName: 'PreToolUse', additionalContext: decision.text });
       return 0;
 

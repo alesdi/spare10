@@ -13,15 +13,15 @@ import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { UsageError, type ParsedArgs } from './args';
 import { listAgents, resumeBackground, stillStopped } from './background';
-import { isTripped } from './decide';
+import { formatResetTime, limitNames, trippedLimits } from './decide';
 import { tildePath, type PromptView } from './panel';
 import { buildSettings, readChainTarget } from './settings';
 import { ask } from './terminal';
-import type { RunConfig, SessionInfo, State, StoppedSession } from './types';
+import type { Limit, RunConfig, SessionInfo, State, StoppedSession } from './types';
 import {
   clearStopped,
   configPath,
-  disarmUntil,
+  consent,
   nowSeconds,
   pickSeed,
   pidPath,
@@ -102,13 +102,30 @@ function launcherSession(): SessionInfo {
   return { version: null, model: null, effort: null, cwd: process.cwd(), fastMode: false };
 }
 
-function preflightView(config: RunConfig): PromptView {
+/** "Weekly reserve reached." — which limit fired is the first thing worth knowing. */
+function reachedHeadline(limits: Limit[]): string {
+  if (limits.length === 0) return 'Reserve reached.';
+  const names = limitNames(limits);
+  const capitalised = `${names.charAt(0).toUpperCase()}${names.slice(1)}`;
+  return `${capitalised} ${limits.length === 1 ? 'reserve' : 'reserves'} reached.`;
+}
+
+/** How long consent lasts, per limit: each one re-arms when its own window resets. */
+export function quietUntil(state: State, limits: Limit[]): string {
+  if (limits.length === 0) return 'spare10 stays quiet until the limit resets.';
+  const times = limits.map((limit) => formatResetTime(state.limits[limit].resetsAt)).join(' and ');
+  const which = limits.length === 1 ? 'limit resets' : 'limits reset';
+  return `spare10 stays quiet until the ${limitNames(limits)} ${which} (${times}).`;
+}
+
+export function preflightView(state: State, config: RunConfig, limits: Limit[]): PromptView {
+  const reserves = limits.map((limit) => `${config.reserve[limit]}% ${limit}`).join(' and ');
   return {
     session: launcherSession(),
     headline: 'This session would start inside the reserve.',
     body: [
-      `You have less than the ${config.reserve}% reserve left for this session. ` +
-        `If you decide to start anyway, spare10 will stay quiet until the limit resets.`,
+      `You have less than the ${reserves} ${limits.length === 1 ? 'reserve' : 'reserves'} left. ` +
+        `If you decide to start anyway, ${quietUntil(state, limits)}`,
     ],
     choices: [
       { label: 'Start anyway', hint: 'Runs now on your reserve.' },
@@ -117,10 +134,10 @@ function preflightView(config: RunConfig): PromptView {
   };
 }
 
-function haltView(state: State): PromptView {
+export function haltView(state: State, limits: Limit[]): PromptView {
   return {
     session: state.session,
-    headline: 'Reserve reached. The session is paused.',
+    headline: `${reachedHeadline(limits)} The session is paused.`,
     body: [
       'spare10 stopped the agent between tool calls, so nothing is half-written and the ' +
         'whole conversation is saved.',
@@ -128,7 +145,7 @@ function haltView(state: State): PromptView {
     choices: [
       {
         label: 'Resume',
-        hint: 'Continue on the reserve. spare10 stays quiet until the limit resets.',
+        hint: `Continue on the reserve. ${quietUntil(state, limits)}`,
       },
       {
         label: 'Stop here',
@@ -151,7 +168,12 @@ const plural = (n: number, one: string, many: string) => (n === 1 ? one : `${n} 
  * ask about them at all — and it asks about all of them at once, because they all ran on the
  * same quota and the answer is the same for each.
  */
-export function stoppedView(records: StoppedSession[], home = homedir()): PromptView {
+export function stoppedView(
+  records: StoppedSession[],
+  state: State,
+  limits: Limit[],
+  home = homedir(),
+): PromptView {
   const listed = records.slice(0, MAX_LISTED);
   const body = [
     `spare10 stopped ${plural(records.length, 'a background session', 'background sessions')} ` +
@@ -167,12 +189,12 @@ export function stoppedView(records: StoppedSession[], home = homedir()): Prompt
 
   return {
     session: launcherSession(),
-    headline: `Reserve reached. ${plural(records.length, 'A background session is', 'background sessions are')} paused.`,
+    headline: `${reachedHeadline(limits)} ${plural(records.length, 'A background session is', 'background sessions are')} paused.`,
     body,
     choices: [
       {
         label: records.length === 1 ? 'Resume' : 'Resume all',
-        hint: 'Back to the background, on your reserve. spare10 stays quiet until the limit resets.',
+        hint: `Back to the background, on your reserve. ${quietUntil(state, limits)}`,
       },
       {
         label: 'Leave stopped',
@@ -203,7 +225,9 @@ async function settleStopped(runDir: string, config: RunConfig): Promise<void> {
   if (records.length === 0) return;
 
   const state = readState(runDir);
-  if (haltVerdict(await ask({ view: stoppedView(records), state, config })) !== 'resume') {
+  const limits = trippedLimits(state, config, nowSeconds());
+  const view = stoppedView(records, state, limits);
+  if (haltVerdict(await ask({ view, state, config })) !== 'resume') {
     process.stderr.write(`Left stopped. To pick ${records.length === 1 ? 'it' : 'them'} up later:\n`);
     for (const record of records) process.stderr.write(`  claude attach ${record.backgroundId}\n`);
     return;
@@ -211,7 +235,7 @@ async function settleStopped(runDir: string, config: RunConfig): Promise<void> {
 
   // Consent covers the window, exactly as it does for a session stopped in the foreground —
   // and it has to, or every resumed session would trip again on its first tool call.
-  writeState(runDir, { ...state, disarmedUntil: disarmUntil(state, nowSeconds()) });
+  writeState(runDir, consent(state, limits, nowSeconds()));
 
   const resumed: string[] = [];
   for (const record of records) {
@@ -238,9 +262,10 @@ async function settleStopped(runDir: string, config: RunConfig): Promise<void> {
  */
 async function preflight(runDir: string, config: RunConfig): Promise<Preflight> {
   const state = readState(runDir);
-  if (!isTripped(state, config, nowSeconds())) return 'clear';
+  const limits = trippedLimits(state, config, nowSeconds());
+  if (limits.length === 0) return 'clear';
 
-  const answer = await ask({ view: preflightView(config), state, config });
+  const answer = await ask({ view: preflightView(state, config, limits), state, config });
   return preflightVerdict(true, answer);
 }
 
@@ -465,7 +490,8 @@ export async function runLaunch({ config, command }: ParsedArgs): Promise<number
     // Consent given at the door counts for the window. Asking again on the first tool call
     // would be the same question, thirty seconds later.
     const state = readState(runDir);
-    writeState(runDir, { ...state, disarmedUntil: disarmUntil(state, nowSeconds()) });
+    const now = nowSeconds();
+    writeState(runDir, consent(state, trippedLimits(state, { ...config, chain: null }, now), now));
     process.stderr.write('Continuing into the reserve for this window.\n\n');
   }
 
@@ -541,14 +567,15 @@ async function runForeground(run: ForegroundRun): Promise<number> {
     if (!terminated(exit) || state.halted === null) return exitCode(exit);
 
     // The gate stopped it. Same question as the preflight, in the same panel.
-    const halt = haltVerdict(await ask({ view: haltView(state), state, config: runConfig }));
+    const limits = trippedLimits(state, runConfig, nowSeconds());
+    const halt = haltVerdict(await ask({ view: haltView(state, limits), state, config: runConfig }));
     if (halt !== 'resume') {
       process.stderr.write(`Not resumed. To pick it up later: claude --resume ${state.halted}\n`);
       // A declined resume is a choice, not a failure; an unattended stop reports as the kill it was.
       return halt === 'declined' ? 0 : exitCode(exit);
     }
 
-    writeState(runDir, { ...state, halted: null, disarmedUntil: disarmUntil(state, nowSeconds()) });
+    writeState(runDir, { ...consent(state, limits, nowSeconds()), halted: null });
     process.stderr.write('Resuming into the reserve for this window.\n\n');
     args = resumeArgs(rest, state.halted);
   }

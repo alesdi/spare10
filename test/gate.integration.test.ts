@@ -4,7 +4,8 @@ import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readState, readStopped } from '../src/state';
-import { DEFAULT_STATE, type RunConfig, type State } from '../src/types';
+import type { RunConfig } from '../src/types';
+import { stateWith, type StateOverrides } from './helpers';
 
 const BUNDLE = join(__dirname, '..', 'dist', 'spare10.js');
 const nowSeconds = () => Math.floor(Date.now() / 1000);
@@ -44,7 +45,11 @@ beforeAll(() => {
   execFileSync('node', [join(__dirname, '..', 'scripts', 'build.mjs')], { stdio: 'pipe' });
 }, 30_000);
 
-function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string {
+/**
+ * A run directory as the launcher leaves it. The config's single `reserve` figure is the layout
+ * older runs wrote, kept here on purpose: it must still read as a reserve for both limits.
+ */
+function makeRun(state: StateOverrides, config: Partial<RunConfig> = {}): string {
   const dir = mkdtempSync(join(tmpdir(), 'spare10-gate-'));
   writeFileSync(
     join(dir, 'config.json'),
@@ -52,7 +57,7 @@ function makeRun(state: Partial<State>, config: Partial<RunConfig> = {}): string
   );
   writeFileSync(
     join(dir, 'state.json'),
-    JSON.stringify({ ...DEFAULT_STATE, updatedAt: nowSeconds(), resetsAt: nowSeconds() + 3600, ...state }),
+    JSON.stringify(stateWith({ updatedAt: nowSeconds(), resetsAt: nowSeconds() + 3600, ...state })),
   );
   return dir;
 }
@@ -118,6 +123,33 @@ describe('gate', () => {
     expect(readState(dir).halted).toBe('test-session');
   });
 
+  it('stops the process on the weekly limit alone', () => {
+    const now = nowSeconds();
+    const dir = makeRun({ pct: 30, weekly: { pct: 95, resetsAt: now + 3 * 86400, updatedAt: now } });
+    const standIn = invokeUnderStandIn(dir, hookPayload());
+    expect(standIn.signal).toBe('SIGTERM');
+    expect(readState(dir).halted).toBe('test-session');
+  });
+
+  it('tells the model which limit it hit when it can only deny', () => {
+    const now = nowSeconds();
+    const dir = makeRun({ pct: 30, weekly: { pct: 95, resetsAt: now + 3 * 86400, updatedAt: now } });
+    const reason = invoke('gate', dir, hookPayload()).json?.hookSpecificOutput.permissionDecisionReason;
+    expect(reason).toContain('into your 10% weekly reserve');
+    expect(reason).not.toContain('session reserve');
+  });
+
+  it('reads a state file from before the weekly limit was guarded', () => {
+    const dir = makeRun({});
+    const now = nowSeconds();
+    writeFileSync(
+      join(dir, 'state.json'),
+      JSON.stringify({ pct: 93, resetsAt: now + 3600, updatedAt: now, missingStreak: 0, blind: false }),
+    );
+    const reason = invoke('gate', dir, hookPayload()).json?.hookSpecificOutput.permissionDecisionReason;
+    expect(reason).toContain('7% of session quota left');
+  });
+
   it('falls back to denying the call when there is no process to stop', () => {
     // No pid file: the launcher decided the session could not be resumed.
     const dir = makeRun({ pct: 93 });
@@ -127,7 +159,7 @@ describe('gate', () => {
       hookEventName: 'PreToolUse',
       permissionDecision: 'deny',
     });
-    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of quota left');
+    expect(result.json?.hookSpecificOutput.permissionDecisionReason).toContain('7% of session quota left');
     expect(readState(dir).halted).toBeNull();
   });
 
@@ -204,8 +236,8 @@ describe('gate', () => {
     expect(output.permissionDecision).toBeUndefined();
 
     const state = readState(dir);
-    expect(state.pausePromptInjectedTo).toEqual(['test-session:main']);
-    expect(state.disarmedUntil).toBeNull();
+    expect(state.limits.session.pausePromptInjectedTo).toEqual(['test-session:main']);
+    expect(state.limits.session.disarmedUntil).toBeNull();
 
     expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
   });
@@ -221,7 +253,7 @@ describe('gate', () => {
     // Each agent is told once; afterwards its own calls pass while newcomers are still told.
     expect(invoke('gate', dir, sub('a')).stdout).toBe('');
     expect(invoke('gate', dir, hookPayload()).stdout).toBe('');
-    expect(readState(dir).pausePromptInjectedTo).toEqual([
+    expect(readState(dir).limits.session.pausePromptInjectedTo).toEqual([
       'test-session:main',
       'test-session:a',
       'test-session:b',
@@ -238,7 +270,7 @@ describe('gate', () => {
     expect(invoke('gate', dir, session('two')).json?.hookSpecificOutput.additionalContext).toContain('Commit and stop.');
     expect(invoke('gate', dir, session('one')).stdout).toBe('');
 
-    expect(readState(dir).pausePromptInjectedTo).toEqual(['one:main', 'two:main']);
+    expect(readState(dir).limits.session.pausePromptInjectedTo).toEqual(['one:main', 'two:main']);
   });
 
   it('survives an unparseable payload without blocking', () => {

@@ -5,7 +5,7 @@
  * so the whole look is testable without a terminal. `src/terminal.ts` owns the tty.
  */
 
-import { remaining, type RunConfig, type SessionInfo, type State } from './types';
+import { LIMITS, remaining, type Limit, type RunConfig, type SessionInfo, type State } from './types';
 import { formatResetTime } from './decide';
 
 export interface Caps {
@@ -112,10 +112,28 @@ export function usageBar(pct: number, width: number, p: Palette, unicode: boolea
   return `${p.brand(glyph.filled.repeat(filled))}${p.dim(glyph.empty.repeat(cells - filled))}`;
 }
 
-/** The quota in one line, the only place the figures are worded. */
-export function factsLine(state: State): string {
-  if (state.pct === null) return `quota unknown · resets ${formatResetTime(state.resetsAt)}`;
-  return `${state.pct}% used · ${remaining(state.pct)}% left · resets ${formatResetTime(state.resetsAt)}`;
+/**
+ * One limit's quota in one line, the only place the figures are worded. `short` drops the
+ * used figure, which the bar beside it already shows, for panels too narrow to take it all.
+ */
+export function factsLine(state: State, limit: Limit, short = false): string {
+  const { pct, resetsAt } = state.limits[limit];
+  const resets = `resets ${formatResetTime(resetsAt)}`;
+  if (pct === null) return `quota unknown · ${resets}`;
+  return `${short ? '' : `${pct}% used · `}${remaining(pct)}% left · ${resets}`;
+}
+
+/** The limits there is something to show for. An unknown limit is left out, not guessed at. */
+const known = (state: State): Limit[] => LIMITS.filter((limit) => state.limits[limit].pct !== null);
+
+const LABEL_WIDTH = Math.max(...LIMITS.map((limit) => limit.length));
+/** A bar shorter than this is noise; the figures stand alone instead. */
+const MIN_BAR = 6;
+
+/** The reserve, once when both limits share it and in limit order when they do not. */
+export function reserveTag(config: RunConfig): string {
+  const { session, weekly } = config.reserve;
+  return session === weekly ? `${session}% reserve` : `${session}% · ${weekly}% reserve`;
 }
 
 export interface Choice {
@@ -207,12 +225,21 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
   const content: string[] = [];
   const push = (line = '') => content.push(line);
 
-  push(p.bold(view.headline));
+  for (const line of wrap(view.headline, text)) push(p.bold(line));
 
-  const facts = factsLine(state);
-  if (state.pct !== null) {
-    const barWidth = Math.max(6, text - visibleWidth(facts) - 2);
-    push(`${usageBar(state.pct, barWidth, p, caps.unicode)}  ${p.dim(facts)}`);
+  // One bar per limit, all the same length so they read as a column. The widest facts line
+  // sets it: the figures matter more than the bar, so a narrow panel shortens the figures
+  // first and only then gives up the bar.
+  const shown = known(state);
+  const room = (short: boolean) =>
+    text - LABEL_WIDTH - 4 - Math.max(0, ...shown.map((limit) => factsLine(state, limit, short).length));
+  const short = room(false) < MIN_BAR;
+  const barWidth = room(short);
+  for (const limit of shown) {
+    const facts = p.dim(factsLine(state, limit, short));
+    const name = p.dim(limit.padEnd(LABEL_WIDTH));
+    if (barWidth < MIN_BAR) push(`${name}  ${facts}`);
+    else push(`${name}  ${usageBar(state.limits[limit].pct as number, barWidth, p, caps.unicode)}  ${facts}`);
   }
 
   push();
@@ -229,16 +256,13 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
   for (let row = 0; row < hintRows; row += 1) push(p.dim(chosen[row] ?? ''));
 
   push();
-  push(
-    p.dim(
-      caps.unicode
-        ? '←/→ choose · enter confirm · esc cancel'
-        : 'left/right choose, enter confirm, esc cancel',
-    ),
-  );
+  const keys = caps.unicode
+    ? '←/→ choose · enter confirm · esc cancel'
+    : 'left/right choose, enter confirm, esc cancel';
+  for (const line of wrap(keys, text)) push(p.dim(line));
 
   const title = ` ${p.brand(p.bold('spare10'))} `;
-  const reserve = `${config.reserve}% reserve`;
+  const reserve = reserveTag(config);
   const fill = Math.max(1, width - 6 - visibleWidth(title) - visibleWidth(reserve));
   const top = `${box.tl}${box.h}${title}${box.h.repeat(fill)} ${p.dim(reserve)} ${box.h}${box.tr}`;
 
@@ -253,5 +277,6 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
 
 /** The same question on a terminal that cannot take the panel: plain lines, as before. */
 export function plainPrompt(view: PromptView, state: State): string {
-  return `\nspare10 — ${factsLine(state)}\n${view.headline}\n${view.choices[0].label}? [y/N] `;
+  const facts = known(state).map((limit) => `\nspare10 — ${limit}: ${factsLine(state, limit)}`);
+  return `${facts.join('') || '\nspare10'}\n${view.headline}\n${view.choices[0].label}? [y/N] `;
 }
