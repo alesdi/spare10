@@ -113,7 +113,7 @@ const ARROW = { unicode: { down: '▼', up: '▲' }, ascii: { down: 'v', up: '^'
 /**
  * An arrow pointing at the last cell a bar has to fill to reach its threshold, to sit on the row
  * above or below a bar of the same width. It uses the fill's own rounding, so a limit at or past
- * its threshold always has the cell under the arrow filled.
+ * its threshold always has the cell under the arrow filled. Coloured like the bar it marks.
  */
 export function thresholdMarker(
   trip: number,
@@ -121,10 +121,12 @@ export function thresholdMarker(
   p: Palette,
   unicode: boolean,
   direction: 'down' | 'up',
+  hot = false,
 ): string {
   const cells = Math.max(4, width);
   const at = Math.max(0, cellsFor(trip, cells) - 1);
-  return `${' '.repeat(at)}${p.dim((unicode ? ARROW.unicode : ARROW.ascii)[direction])}`;
+  const paint = hot ? p.brand : p.dim;
+  return `${' '.repeat(at)}${paint((unicode ? ARROW.unicode : ARROW.ascii)[direction])}`;
 }
 
 /**
@@ -266,10 +268,11 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
   const bars = barWidth >= MIN_BAR;
   // The threshold is marked from outside the column: pointing down at the top bar's, and up at
   // the bottom bar's, so each arrow sits against the bar whose reserve it marks.
+  const hot = (limit: Limit) => (state.limits[limit].pct as number) >= tripPoint(config, limit);
   const marker = (limit: Limit, direction: 'down' | 'up') =>
     push(
       `${' '.repeat(LABEL_WIDTH + 2)}` +
-        thresholdMarker(tripPoint(config, limit), barWidth, p, caps.unicode, direction),
+        thresholdMarker(tripPoint(config, limit), barWidth, p, caps.unicode, direction, hot(limit)),
     );
   if (bars && shown.length > 0) marker(shown[0] as Limit, 'down');
   for (const limit of shown) {
@@ -277,8 +280,7 @@ export function renderPanel({ view, state, config, selected, caps, home }: Panel
     const name = p.dim(limit.padEnd(LABEL_WIDTH));
     if (!bars) push(`${name}  ${facts}`);
     else {
-      const pct = state.limits[limit].pct as number;
-      const bar = usageBar(pct, barWidth, p, caps.unicode, pct >= tripPoint(config, limit));
+      const bar = usageBar(state.limits[limit].pct as number, barWidth, p, caps.unicode, hot(limit));
       push(`${name}  ${bar}  ${facts}`);
     }
   }

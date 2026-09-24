@@ -206,6 +206,16 @@ describe('threshold arrows in the panel', () => {
     expect(offset(down, 'v')).toBeLessThan(offset(up, '^'));
   });
 
+  it('colours each arrow like the bar it marks', () => {
+    const brand = '\u001b[38;2;217;119;87m';
+    // Session into its reserve (top, ▼); weekly well clear of it (bottom, ▲).
+    const lines = card(FULL, 0, weekly);
+    const down = lines.find((line) => line.includes('▼')) as string;
+    const up = lines.find((line) => line.includes('▲')) as string;
+    expect(down).toContain(`${brand}▼`);
+    expect(up).not.toContain(brand);
+  });
+
   it('draws no arrows when the panel is too narrow for bars', () => {
     const narrow: Caps = { ...PLAIN, columns: MIN_PANEL_WIDTH };
     expect(arrows(card(narrow, 0, { weekly: { ...weekly.weekly, pct: 93 } }))).toEqual([]);
